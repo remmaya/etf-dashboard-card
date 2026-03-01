@@ -7,13 +7,18 @@ import plotly.graph_objects as go
 from core import macd, rsi, slice_period, ETF_INFO
 
 # ETF_INFO のキー（ティッカー）をそのまま使う：8銘柄全部が対象
+# ETF_INFO のキー（ティッカー）をそのまま使う：8銘柄全部が対象
 TARGET_ETFS = list(ETF_INFO.keys())
 
 def go_prev():
-    st.session_state.etf_index = (st.session_state.etf_index - 1) % len(TARGET_ETFS)
+    cur = st.session_state.get("ticker_select", TARGET_ETFS[0])
+    idx = TARGET_ETFS.index(cur)
+    st.session_state["ticker_select"] = TARGET_ETFS[(idx - 1) % len(TARGET_ETFS)]
 
 def go_next():
-    st.session_state.etf_index = (st.session_state.etf_index + 1) % len(TARGET_ETFS)
+    cur = st.session_state.get("ticker_select", TARGET_ETFS[0])
+    idx = TARGET_ETFS.index(cur)
+    st.session_state["ticker_select"] = TARGET_ETFS[(idx + 1) % len(TARGET_ETFS)]
 
 # ----------------------------------------
 # ページ基本設定
@@ -205,36 +210,31 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
 # レイアウト切り替え
 # ----------------------------------------
 if layout_mode == "カード（1銘柄ずつ）":
-    # 現在のインデックスをセッションに保持
-    if "etf_index" not in st.session_state:
-        st.session_state.etf_index = 0
+    # 初期値のセット（selectbox 用）
+    if "ticker_select" not in st.session_state:
+        st.session_state["ticker_select"] = TARGET_ETFS[0]
 
     cols = st.columns([1, 2, 1])
 
-    # ◀ ボタン
+    # ◀ ボタン（クリックで ticker_select を更新）
     with cols[0]:
         st.button("◀", on_click=go_prev)
 
-    # 中央：セレクトボックスで銘柄選択
+    # 中央：セレクトボックス（state の唯一のソース）
     with cols[1]:
         current_ticker = st.selectbox(
             "表示中のETF",
             TARGET_ETFS,
-            index=st.session_state.etf_index,
-            key="ticker_select",
+            key="ticker_select",   # index は渡さない
         )
-        # セレクトボックス操作時に index を同期
-        selected_idx = TARGET_ETFS.index(current_ticker)
-        if selected_idx != st.session_state.etf_index:
-            st.session_state.etf_index = selected_idx
 
     # ▶ ボタン
     with cols[2]:
         st.button("▶", on_click=go_next)
 
-    # 選択中の1銘柄だけ表示（カードモードは常に2段構成）
+    # 選択中の1銘柄だけ表示（2段構成）
     render_etf_block(
-        TARGET_ETFS[st.session_state.etf_index],
+        current_ticker,
         period,
         currency,
         view_mode,
@@ -244,6 +244,7 @@ if layout_mode == "カード（1銘柄ずつ）":
     )
 
 else:
-    # 一覧（縦スクロール）モード：従来どおり view_mode に従う
+    # 一覧（縦スクロール）モード
     for ticker in TARGET_ETFS:
         render_etf_block(ticker, period, currency, view_mode, raw, fx)
+
