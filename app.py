@@ -131,39 +131,70 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
         st.plotly_chart(fig, use_container_width=True)
 
     # ---------------------------
-    # MACD + RSI
+    # MACD + RSI（1枚のグラフに統合）
     # ---------------------------
     if show_macd_rsi:
         macd_line, signal_line = macd(df["Close"])
         rsi_line = rsi(df["Close"])
 
-        # ----- MACD -----
         macd_df = pd.DataFrame(
             {"MACD": macd_line, "Signal": signal_line}
         ).loc[df.index]
+        rsi_df = pd.DataFrame({"RSI": rsi_line}).loc[df.index]
 
-        fig_macd = go.Figure()
+        fig_mr = go.Figure()
 
-        fig_macd.add_trace(
+        # --- MACD / Signal（左軸・折れ線） ---
+        fig_mr.add_trace(
             go.Scatter(
                 x=macd_df.index,
                 y=macd_df["MACD"],
                 name="MACD",
                 line=dict(color="blue", width=2),
+                yaxis="y",
             )
         )
-        fig_macd.add_trace(
+        fig_mr.add_trace(
             go.Scatter(
                 x=macd_df.index,
                 y=macd_df["Signal"],
                 name="Signal",
                 line=dict(color="red", width=2),
+                yaxis="y",
             )
         )
 
-        fig_macd.update_layout(
-            height=260,
+        # --- RSI（右軸・棒グラフ） ---
+        fig_mr.add_trace(
+            go.Bar(
+                x=rsi_df.index,
+                y=rsi_df["RSI"],
+                name="RSI",
+                marker_color="rgba(100, 100, 255, 0.4)",
+                yaxis="y2",
+            )
+        )
+
+        # RSI 30/50/70 の基準線（右軸）
+        if not rsi_df.empty:
+            x0 = rsi_df.index.min()
+            x1 = rsi_df.index.max()
+            for lvl in [30, 50, 70]:
+                fig_mr.add_shape(
+                    type="line",
+                    x0=x0,
+                    x1=x1,
+                    y0=lvl,
+                    y1=lvl,
+                    xref="x",
+                    yref="y2",
+                    line=dict(color="gray", dash="dot"),
+                )
+
+        fig_mr.update_layout(
+            height=320,
             margin=dict(l=20, r=20, t=40, b=20),
+            barmode="overlay",
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
@@ -171,36 +202,22 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
                 xanchor="right",
                 x=1,
             ),
+            # 左軸：MACD
+            yaxis=dict(
+                title="MACD",
+                showgrid=True,
+            ),
+            # 右軸：RSI（0〜100）
+            yaxis2=dict(
+                title="RSI",
+                overlaying="y",
+                side="right",
+                range=[0, 100],
+                showgrid=False,
+            ),
         )
-        st.plotly_chart(fig_macd, use_container_width=True)
 
-        # ----- RSI -----
-        rsi_df = pd.DataFrame({"RSI": rsi_line}).loc[df.index]
-
-        fig_rsi = go.Figure()
-        fig_rsi.add_trace(
-            go.Bar(
-                x=rsi_df.index,
-                y=rsi_df["RSI"],
-                name="RSI",
-                marker_color="rgba(100, 100, 255, 0.6)",
-            )
-        )
-
-        for lvl in [30, 50, 70]:
-            fig_rsi.add_hline(
-                y=lvl,
-                line_dash="dot",
-                line_color="gray",
-            )
-
-        fig_rsi.update_layout(
-            height=200,
-            margin=dict(l=20, r=20, t=20, b=20),
-            showlegend=False,
-            yaxis=dict(range=[0, 100]),
-        )
-        st.plotly_chart(fig_rsi, use_container_width=True)
+        st.plotly_chart(fig_mr, use_container_width=True)
 
     # ETFごとに少し余白
     st.markdown("---")
@@ -251,3 +268,4 @@ else:
     # 一覧（縦スクロール）モード
     for ticker in TARGET_ETFS:
         render_etf_block(ticker, period, currency, view_mode, raw, fx)
+
