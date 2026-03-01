@@ -214,23 +214,27 @@ if layout_mode == "カード（1銘柄ずつ）":
     if "ticker_select" not in st.session_state:
         st.session_state["ticker_select"] = TARGET_ETFS[0]
 
-    cols = st.columns([1, 2, 1])
+    # ラベルは上にだけ表示
+    st.caption("表示中のETF")
+
+    col_left, col_center, col_right = st.columns([1, 4, 1])
 
     # ◀ ボタン（クリックで ticker_select を更新）
-    with cols[0]:
-        st.button("◀", on_click=go_prev)
+    with col_left:
+        st.button("◀", on_click=go_prev, use_container_width=True)
 
-    # 中央：セレクトボックス（state の唯一のソース）
-    with cols[1]:
+    # 中央：セレクトボックス（ラベルは隠す）
+    with col_center:
         current_ticker = st.selectbox(
-            "表示中のETF",
+            "",
             TARGET_ETFS,
-            key="ticker_select",   # index は渡さない
+            key="ticker_select",
+            label_visibility="collapsed",
         )
 
     # ▶ ボタン
-    with cols[2]:
-        st.button("▶", on_click=go_next)
+    with col_right:
+        st.button("▶", on_click=go_next, use_container_width=True)
 
     # 選択中の1銘柄だけ表示（2段構成）
     render_etf_block(
@@ -247,4 +251,3 @@ else:
     # 一覧（縦スクロール）モード
     for ticker in TARGET_ETFS:
         render_etf_block(ticker, period, currency, view_mode, raw, fx)
-
