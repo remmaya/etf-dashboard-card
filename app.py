@@ -9,6 +9,12 @@ from core import macd, rsi, slice_period, ETF_INFO
 # ETF_INFO のキー（ティッカー）をそのまま使う：8銘柄全部が対象
 TARGET_ETFS = list(ETF_INFO.keys())
 
+def go_prev():
+    st.session_state.etf_index = (st.session_state.etf_index - 1) % len(TARGET_ETFS)
+
+def go_next():
+    st.session_state.etf_index = (st.session_state.etf_index + 1) % len(TARGET_ETFS)
+
 # ----------------------------------------
 # ページ基本設定
 # ----------------------------------------
@@ -95,10 +101,14 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
     # 見出し
     st.markdown(f"### {ticker}（{label}）｜ {perf_pct:+.2f}%  [{cur}]")
 
+    # どのグラフを出すかを決定
+    show_price = (view_mode == "Price") or show_both
+    show_macd_rsi = (view_mode == "MACD+RSI") or show_both
+
     # ---------------------------
-    # Price モード
+    # Price
     # ---------------------------
-    if view_mode == "Price":
+    if show_price:
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
@@ -116,9 +126,9 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
         st.plotly_chart(fig, use_container_width=True)
 
     # ---------------------------
-    # MACD + RSI モード
+    # MACD + RSI
     # ---------------------------
-    else:
+    if show_macd_rsi:
         macd_line, signal_line = macd(df["Close"])
         rsi_line = rsi(df["Close"])
 
@@ -129,7 +139,6 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
 
         fig_macd = go.Figure()
 
-        # MACD（青）
         fig_macd.add_trace(
             go.Scatter(
                 x=macd_df.index,
@@ -138,8 +147,6 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
                 line=dict(color="blue", width=2),
             )
         )
-
-        # Signal（赤）
         fig_macd.add_trace(
             go.Scatter(
                 x=macd_df.index,
@@ -162,11 +169,10 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
         )
         st.plotly_chart(fig_macd, use_container_width=True)
 
-        # ----- RSI（棒グラフ） -----
+        # ----- RSI -----
         rsi_df = pd.DataFrame({"RSI": rsi_line}).loc[df.index]
 
         fig_rsi = go.Figure()
-
         fig_rsi.add_trace(
             go.Bar(
                 x=rsi_df.index,
@@ -176,7 +182,6 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
             )
         )
 
-        # 基準線 30 / 50 / 70
         for lvl in [30, 50, 70]:
             fig_rsi.add_hline(
                 y=lvl,
@@ -190,55 +195,7 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx):
             showlegend=False,
             yaxis=dict(range=[0, 100]),
         )
-
         st.plotly_chart(fig_rsi, use_container_width=True)
 
     # ETFごとに少し余白
     st.markdown("---")
-
-
-# ----------------------------------------
-# レイアウト切り替え
-# ----------------------------------------
-if layout_mode == "カード（1銘柄ずつ）":
-    # 現在のインデックスをセッションに保持
-    if "etf_index" not in st.session_state:
-        st.session_state.etf_index = 0
-
-    cols = st.columns([1, 2, 1])
-
-    # ◀ ボタン
-    with cols[0]:
-        if st.button("◀"):
-            st.session_state.etf_index = (st.session_state.etf_index - 1) % len(TARGET_ETFS)
-
-    # 中央：セレクトボックスで銘柄選択
-    with cols[1]:
-        current_ticker = st.selectbox(
-            "表示中のETF",
-            TARGET_ETFS,
-            index=st.session_state.etf_index,
-            key="ticker_select",
-        )
-        # セレクトボックス操作時に index 同期
-        st.session_state.etf_index = TARGET_ETFS.index(current_ticker)
-
-    # ▶ ボタン
-    with cols[2]:
-        if st.button("▶"):
-            st.session_state.etf_index = (st.session_state.etf_index + 1) % len(TARGET_ETFS)
-
-    # 選択中の1銘柄だけ表示
-    render_etf_block(
-        TARGET_ETFS[st.session_state.etf_index],
-        period,
-        currency,
-        view_mode,
-        raw,
-        fx,
-    )
-
-else:
-    # 一覧（縦スクロール）モード
-    for ticker in TARGET_ETFS:
-        render_etf_block(ticker, period, currency, view_mode, raw, fx)
