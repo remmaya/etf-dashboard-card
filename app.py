@@ -81,6 +81,42 @@ else:
 
 
 # ----------------------------------------
+# ETF ラベル文字列（ティッカー＋日本語名＋騰落率＋通貨）を作るヘルパ
+# ----------------------------------------
+def build_etf_label(ticker, period, currency, raw, fx):
+    """
+    ICLN → 'ICLN（クリエネ）｜ -2.12% [JPY]' みたいな表示用ラベルを作る。
+    データが欠ける場合は単純に 'ICLN（クリエネ）' を返す。
+    """
+    if ticker not in raw.columns:
+        return ticker
+
+    usd_series = raw[ticker].dropna()
+    if usd_series.empty:
+        return ticker
+
+    # 円建て or ドル建て
+    if currency == "JPY" and not fx.empty:
+        fx_aligned = fx.reindex(usd_series.index).ffill()
+        price = usd_series * fx_aligned
+        cur = "JPY"
+    else:
+        price = usd_series
+        cur = "USD"
+
+    df = pd.DataFrame({"Close": price})
+    df = slice_period(df, period)
+    if df.empty:
+        # 期間内データがなければ騰落率は出さない
+        label_jp = ETF_INFO.get(ticker, ticker)
+        return f"{ticker}（{label_jp}）"
+
+    perf_pct = (df["Close"].iloc[-1] / df["Close"].iloc[0] - 1) * 100
+    label_jp = ETF_INFO.get(ticker, ticker)
+    return f"{ticker}（{label_jp}）｜ {perf_pct:+.2f}% [{cur}]"
+
+
+# ----------------------------------------
 # 1銘柄分の表示をまとめた関数
 # ----------------------------------------
 def render_etf_block(
@@ -92,6 +128,7 @@ def render_etf_block(
     fx,
     show_both: bool = False,
     compact: bool = False,
+    show_heading: bool = True,
 ):
     if ticker not in raw.columns:
         return
@@ -118,8 +155,9 @@ def render_etf_block(
     perf_pct = (df["Close"].iloc[-1] / df["Close"].iloc[0] - 1) * 100
     label = ETF_INFO.get(ticker, ticker)
 
-    # 見出し
-    st.markdown(f"### {ticker}（{label}）｜ {perf_pct:+.2f}%  [{cur}]")
+    # 見出し（カードモードでは非表示にできる）
+    if show_heading:
+        st.markdown(f"### {ticker}（{label}）｜ {perf_pct:+.2f}%  [{cur}]")
 
     # どのグラフを出すかを決定
     show_price = (view_mode == "Price") or show_both
@@ -266,30 +304,37 @@ if layout_mode == "カード（1銘柄ずつ）":
     if "ticker_select" not in st.session_state:
         st.session_state["ticker_select"] = TARGET_ETFS[0]
 
-    # ラベルは上にだけ表示（スマホでの縦積み対策）
-    st.caption("表示中のETF")
+    # 各ETFの表示用ラベルを事前計算
+    etf_labels = {
+        t: build_etf_label(t, period, currency, raw, fx) for t in TARGET_ETFS
+    }
 
+    # 3 カラムで ◀ [ETFラベル付きセレクト] ▶ を 1 行にまとめる
     col_left, col_center, col_right = st.columns([1, 4, 1])
 
     # ◀ ボタン
     with col_left:
         st.button("◀", on_click=go_prev, use_container_width=True)
 
-    st.markdown("""
-    <style>
-    div[data-baseweb="select"] {
-        max-width: 180px !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-    
-    # セレクトボックス（ラベルは隠す）
+    # セレクトボックス（ラベルは隠して中身にラベル文字列を表示）
     with col_center:
+        # セレクトの見た目を少しだけ短く抑える（任意）
+        st.markdown(
+            """
+            <style>
+            div[data-baseweb="select"] {
+                max-width: 260px !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         current_ticker = st.selectbox(
             "",
             TARGET_ETFS,
             key="ticker_select",
+            format_func=lambda x: etf_labels.get(x, x),
             label_visibility="collapsed",
         )
 
@@ -298,6 +343,7 @@ if layout_mode == "カード（1銘柄ずつ）":
         st.button("▶", on_click=go_next, use_container_width=True)
 
     # 選択中の1銘柄だけ表示（カードモードは常に2段＋コンパクト）
+    # ※ 見出しは selectbox に統合したので show_heading=False
     render_etf_block(
         current_ticker,
         period,
@@ -307,6 +353,7 @@ if layout_mode == "カード（1銘柄ずつ）":
         fx,
         show_both=True,
         compact=True,
+        show_heading=False,
     )
 
 else:
@@ -321,8 +368,5 @@ else:
             fx,
             show_both=False,
             compact=False,
+            show_heading=True,
         )
-
-
-
-
