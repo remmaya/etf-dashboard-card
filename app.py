@@ -7,18 +7,23 @@ import plotly.graph_objects as go
 from core import macd, rsi, slice_period, ETF_INFO
 
 # ETF_INFO のキー（ティッカー）をそのまま使う：8銘柄全部が対象
-# ETF_INFO のキー（ティッカー）をそのまま使う：8銘柄全部が対象
 TARGET_ETFS = list(ETF_INFO.keys())
 
+
+# ----------------------------------------
+# ETF 選択用：矢印ボタンのハンドラ
+# ----------------------------------------
 def go_prev():
     cur = st.session_state.get("ticker_select", TARGET_ETFS[0])
     idx = TARGET_ETFS.index(cur)
     st.session_state["ticker_select"] = TARGET_ETFS[(idx - 1) % len(TARGET_ETFS)]
 
+
 def go_next():
     cur = st.session_state.get("ticker_select", TARGET_ETFS[0])
     idx = TARGET_ETFS.index(cur)
     st.session_state["ticker_select"] = TARGET_ETFS[(idx + 1) % len(TARGET_ETFS)]
+
 
 # ----------------------------------------
 # ページ基本設定
@@ -52,6 +57,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+
 # ----------------------------------------
 # データ取得（cache付き）
 # ----------------------------------------
@@ -77,7 +83,16 @@ else:
 # ----------------------------------------
 # 1銘柄分の表示をまとめた関数
 # ----------------------------------------
-def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bool = False):
+def render_etf_block(
+    ticker,
+    period,
+    currency,
+    view_mode,
+    raw,
+    fx,
+    show_both: bool = False,
+    compact: bool = False,
+):
     if ticker not in raw.columns:
         return
 
@@ -110,6 +125,10 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
     show_price = (view_mode == "Price") or show_both
     show_macd_rsi = (view_mode == "MACD+RSI") or show_both
 
+    # コンパクトモード用の高さ
+    price_height = 220 if compact else 280
+    mr_height = 260 if compact else 320
+
     # ---------------------------
     # Price
     # ---------------------------
@@ -124,7 +143,7 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
             )
         )
         fig.update_layout(
-            height=280,
+            height=price_height,
             margin=dict(l=20, r=20, t=40, b=20),
             showlegend=False,
         )
@@ -192,7 +211,7 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
                 )
 
         fig_mr.update_layout(
-            height=320,
+            height=mr_height,
             margin=dict(l=20, r=20, t=40, b=20),
             barmode="overlay",
             legend=dict(
@@ -219,8 +238,9 @@ def render_etf_block(ticker, period, currency, view_mode, raw, fx, show_both: bo
 
         st.plotly_chart(fig_mr, use_container_width=True)
 
-    # ETFごとに少し余白
-    st.markdown("---")
+    # ETFごとに少し余白（一覧モードのみ）
+    if not compact:
+        st.markdown("---")
 
 
 # ----------------------------------------
@@ -231,16 +251,16 @@ if layout_mode == "カード（1銘柄ずつ）":
     if "ticker_select" not in st.session_state:
         st.session_state["ticker_select"] = TARGET_ETFS[0]
 
-    # ラベルは上にだけ表示
+    # ラベルは上にだけ表示（スマホでの縦積み対策）
     st.caption("表示中のETF")
 
     col_left, col_center, col_right = st.columns([1, 4, 1])
 
-    # ◀ ボタン（クリックで ticker_select を更新）
+    # ◀ ボタン
     with col_left:
         st.button("◀", on_click=go_prev, use_container_width=True)
 
-    # 中央：セレクトボックス（ラベルは隠す）
+    # セレクトボックス（ラベルは隠す）
     with col_center:
         current_ticker = st.selectbox(
             "",
@@ -253,7 +273,7 @@ if layout_mode == "カード（1銘柄ずつ）":
     with col_right:
         st.button("▶", on_click=go_next, use_container_width=True)
 
-    # 選択中の1銘柄だけ表示（2段構成）
+    # 選択中の1銘柄だけ表示（カードモードは常に2段＋コンパクト）
     render_etf_block(
         current_ticker,
         period,
@@ -262,10 +282,19 @@ if layout_mode == "カード（1銘柄ずつ）":
         raw,
         fx,
         show_both=True,
+        compact=True,
     )
 
 else:
-    # 一覧（縦スクロール）モード
+    # 一覧（縦スクロール）モード：従来どおり view_mode に従う
     for ticker in TARGET_ETFS:
-        render_etf_block(ticker, period, currency, view_mode, raw, fx)
-
+        render_etf_block(
+            ticker,
+            period,
+            currency,
+            view_mode,
+            raw,
+            fx,
+            show_both=False,
+            compact=False,
+        )
