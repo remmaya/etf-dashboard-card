@@ -29,7 +29,7 @@ def go_next():
 # ページ基本設定
 # ----------------------------------------
 st.set_page_config(page_title="ETF Dashboard", layout="centered")
-st.title("ETF Dashboard（Price / MACD / RSI）")
+st.title("ETF Dashboard")
 
 # ----------------------------------------
 # サイドバー（建値・期間・表示形式・レイアウト）
@@ -183,17 +183,32 @@ def render_etf_block(
             )
         )
 
-        # --- RSI（右軸・棒グラフ） ---
+        # --- RSI（右軸・棒グラフ：ゾーンで色分け） ---
+        # 30 未満 = 水色, 70 超 = 赤, それ以外 = 既存の青系
+        rsi_colors = []
+        for v in rsi_df["RSI"]:
+            if pd.isna(v):
+                # 欠損は透明にしておく
+                rsi_colors.append("rgba(0, 0, 0, 0)")
+            elif v < 30:
+                # 水色（オーバーソールド）
+                rsi_colors.append("rgba(0, 191, 255, 0.8)")  # DeepSkyBlue-ish
+            elif v > 70:
+                # 赤（オーバーボート）
+                rsi_colors.append("rgba(255, 99, 132, 0.85)")
+            else:
+                # 通常ゾーンは従来どおり薄い青
+                rsi_colors.append("rgba(100, 100, 255, 0.4)")
+
         fig_mr.add_trace(
             go.Bar(
                 x=rsi_df.index,
                 y=rsi_df["RSI"],
                 name="RSI",
-                marker_color="rgba(100, 100, 255, 0.4)",
+                marker_color=rsi_colors,
                 yaxis="y2",
             )
         )
-
         # RSI 30/50/70 の基準線（右軸）
         if not rsi_df.empty:
             x0 = rsi_df.index.min()
@@ -298,3 +313,4 @@ else:
             show_both=False,
             compact=False,
         )
+
