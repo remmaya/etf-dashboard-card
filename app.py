@@ -275,6 +275,15 @@ if layout_mode == "カード（1銘柄ずつ）":
     with col_left:
         st.button("◀", on_click=go_prev, use_container_width=True)
 
+    st.markdown("""
+    <style>
+    div[data-baseweb="select"] {
+        max-width: 180px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+    
     # セレクトボックス（ラベルは隠す）
     with col_center:
         current_ticker = st.selectbox(
@@ -313,4 +322,5 @@ else:
             show_both=False,
             compact=False,
         )
+
 
