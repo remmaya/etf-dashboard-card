@@ -28,7 +28,7 @@ def go_next():
 # ----------------------------------------
 # ページ基本設定
 # ----------------------------------------
-st.set_page_config(page_title="ETF Dashboard", layout="wide")
+st.set_page_config(page_title="ETF Dashboard", layout="centered")
 st.title("ETF Dashboard")
 
 # ----------------------------------------
@@ -322,6 +322,7 @@ else:
             show_both=False,
             compact=False,
         )
+
 
 
 
