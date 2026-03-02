@@ -4,7 +4,7 @@ from datetime import timedelta
 
 # ETF情報（キーはティッカー、値は日本語ラベル）
 ETF_INFO = {
-    "ICLN": "クリーエネ",
+    "ICLN": "クリエネ",
     "IEMG": "新興国",
     "IXP": "コミュ",
     "IXJ": "ヘルスケア",
@@ -55,5 +55,6 @@ def slice_period(df: pd.DataFrame, period_key: str) -> pd.DataFrame:
     else:
         # 想定外の入力はそのまま返す
         return df
+
 
     return df[df.index >= start]
