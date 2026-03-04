@@ -13,14 +13,23 @@ TARGET_ETFS = list(ETF_INFO.keys())
 # ----------------------------------------
 # ETF 選択用：矢印ボタンのハンドラ
 # ----------------------------------------
+def _get_safe_current_ticker() -> str:
+    cur = st.session_state.get("ticker_select", None)
+
+    # None / 空 / 想定外が来たら先頭に戻す
+    if not cur or cur not in TARGET_ETFS:
+        return TARGET_ETFS[0]
+    return cur
+
+
 def go_prev():
-    cur = st.session_state.get("ticker_select", TARGET_ETFS[0])
+    cur = _get_safe_current_ticker()
     idx = TARGET_ETFS.index(cur)
     st.session_state["ticker_select"] = TARGET_ETFS[(idx - 1) % len(TARGET_ETFS)]
 
 
 def go_next():
-    cur = st.session_state.get("ticker_select", TARGET_ETFS[0])
+    cur = _get_safe_current_ticker()
     idx = TARGET_ETFS.index(cur)
     st.session_state["ticker_select"] = TARGET_ETFS[(idx + 1) % len(TARGET_ETFS)]
 
@@ -370,3 +379,4 @@ else:
             compact=False,
             show_heading=True,
         )
+
