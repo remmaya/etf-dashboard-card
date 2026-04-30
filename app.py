@@ -14,6 +14,18 @@ DISPLAY_LABELS = {
     "USDJPY=X": "ドル円",
 }
 
+THEME_COLORS = {
+    "ICLN": "#8FD19E",     # クリエネ
+    "IEMG": "#F28B82",    # 新興国
+    "IXP": "#C5B3E6",     # コミュ
+    "IXJ": "#8FD3C7",     # ヘルスケア
+    "KXI": "#9ECAE1",     # 生活必需品
+    "IAU": "#FFE066",     # ゴールド
+    "SDG": "#00C853",     # SDGs
+    "IVV": "#8DA0CB",     # 米国大型株
+    "USDJPY=X": "#CCCCCC",
+}
+
 st.set_page_config(page_title="ETF Dashboard", layout="wide")
 
 with st.sidebar:
@@ -25,6 +37,12 @@ with st.sidebar:
     view_mode = st.radio(
         "表示内容",
         ["3×3 Price", "3×3 MACD+RSI", "Card Detail"],
+        index=0,
+    )
+
+    sort_mode = st.radio(
+        "並び替え",
+        ["通常", "騰落率順"],
         index=0,
     )
 
@@ -79,6 +97,29 @@ def make_title(ticker, label, df):
         title += f" / {day_perf:+.1f}%"
 
     return title
+
+
+def render_title(ticker, label, df):
+    title = make_title(ticker, label, df)
+    color = THEME_COLORS.get(ticker, "#999999")
+
+    st.markdown(
+        f"""
+        <div style="
+            background-color: {color};
+            color: black;
+            font-weight: 700;
+            padding: 6px 10px;
+            border-radius: 8px;
+            display: inline-block;
+            margin-bottom: 6px;
+            font-size: 0.95rem;
+        ">
+            {title}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def make_price_chart(df, cur):
@@ -202,15 +243,21 @@ for ticker in DISPLAY_ITEMS:
     items.append((ticker, label, df, cur))
 
 
+if sort_mode == "騰落率順":
+    items.sort(
+        key=lambda x: calc_perf(x[2]["Close"])[0] if calc_perf(x[2]["Close"])[0] is not None else -9999,
+        reverse=True,
+    )
+
+
 if view_mode == "3×3 Price":
     cols = st.columns(3)
 
     for i, (ticker, label, df, cur) in enumerate(items):
         with cols[i % 3]:
-            st.markdown(f"**{make_title(ticker, label, df)}**")
-            fig = make_price_chart(df, cur)
+            render_title(ticker, label, df)
             st.plotly_chart(
-                fig,
+                make_price_chart(df, cur),
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
@@ -220,10 +267,9 @@ elif view_mode == "3×3 MACD+RSI":
 
     for i, (ticker, label, df, cur) in enumerate(items):
         with cols[i % 3]:
-            st.markdown(f"**{make_title(ticker, label, df)}**")
-            fig = make_macd_rsi_chart(df)
+            render_title(ticker, label, df)
             st.plotly_chart(
-                fig,
+                make_macd_rsi_chart(df),
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
@@ -242,23 +288,25 @@ else:
         perf, day_perf = calc_perf(df["Close"])
         latest = df["Close"].iloc[-1]
 
-        st.subheader(f"{ticker}（{label}）")
+        render_title(ticker, label, df)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("現在値", f"{latest:,.2f} {cur}")
         c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
         c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
 
-        st.markdown("### Price")
-        st.plotly_chart(
-            make_price_chart(df, cur),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        tab1, tab2 = st.tabs(["Price", "MACD / RSI"])
 
-        st.markdown("### MACD / RSI")
-        st.plotly_chart(
-            make_macd_rsi_chart(df),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        with tab1:
+            st.plotly_chart(
+                make_price_chart(df, cur),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
+
+        with tab2:
+            st.plotly_chart(
+                make_macd_rsi_chart(df),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
