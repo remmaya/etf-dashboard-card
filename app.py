@@ -559,6 +559,6 @@ elif view_mode == "翌日更新予測":
 
     components.html(
         table_html,
-        height=420,
+        height=500,
         scrolling=False,
     )
