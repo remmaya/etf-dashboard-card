@@ -439,64 +439,96 @@ elif view_mode == "翌日更新予測":
 
         render_colored_label(ticker, label_text)
 
-    st.markdown("---")
+        st.markdown("---")
 
     table_df = pd.DataFrame(pred_rows)
+
+    table_df["ETF変動率"] = (
+        (table_df["ETF現在値"] / table_df["ETF前回値"] - 1) * 100
+    )
+
     table_df = table_df[
         [
             "テーマ",
-            "予測騰落率",
-            "投入pt",
-            "予測変動pt",
-            "予測更新後pt",
             "ETF前回値",
             "ETF現在値",
+            "ETF変動率",
+            "予測騰落率",
+            "予測変動pt",
         ]
     ]
 
-    table_df["予測騰落率"] = table_df["予測騰落率"].map(lambda x: f"{x:+.2f}%")
-    table_df["投入pt"] = table_df["投入pt"].map(lambda x: f"{x:,.0f}")
-    table_df["予測変動pt"] = table_df["予測変動pt"].map(lambda x: f"{x:+,.0f}")
-    table_df["予測更新後pt"] = table_df["予測更新後pt"].map(lambda x: f"{x:,.0f}")
     table_df["ETF前回値"] = table_df["ETF前回値"].map(lambda x: f"{x:,.2f}")
     table_df["ETF現在値"] = table_df["ETF現在値"].map(lambda x: f"{x:,.2f}")
+    table_df["ETF変動率"] = table_df["ETF変動率"].map(lambda x: f"{x:+.2f}%")
+    table_df["予測騰落率"] = table_df["予測騰落率"].map(lambda x: f"{x:+.2f}%")
+    table_df["予測変動pt"] = table_df["予測変動pt"].map(lambda x: f"{x:+,.0f}")
 
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    table_df.columns = [
+        "テーマ",
+        "昨日",
+        "現在",
+        "変動",
+        "dポ投資",
+        "予想損益",
+    ]
 
+    def color_sign(val):
+        text = str(val).replace("%", "").replace(",", "")
+        try:
+            num = float(text)
+        except ValueError:
+            return ""
 
-else:
-    selected = st.selectbox(
-        "銘柄",
-        [ticker for ticker, _, _, _ in items],
-        format_func=lambda x: f"{x}（{DISPLAY_LABELS.get(x, x)}）",
+        if num > 0:
+            return "color: red; font-weight: bold;"
+        elif num < 0:
+            return "color: blue; font-weight: bold;"
+        return ""
+
+    def theme_bg(row):
+        label_to_ticker = {
+            "クリエネ": "ICLN",
+            "新興国": "IEMG",
+            "コミュ": "IXP",
+            "生活必需品": "KXI",
+            "ヘルスケア": "IXJ",
+            "ゴールド": "IAU",
+            "SDGs": "SDG",
+            "米国大型株": "IVV",
+        }
+
+        ticker = label_to_ticker.get(row["テーマ"])
+        color = THEME_COLORS.get(ticker)
+
+        styles = [""] * len(row)
+
+        if color:
+            styles[0] = f"background-color: {color}; color: black; font-weight: bold;"
+
+        return styles
+
+    styled = (
+        table_df.style
+        .map(color_sign, subset=["変動", "dポ投資", "予想損益"])
+        .apply(theme_bg, axis=1)
+        .set_properties(
+            **{
+                "font-size": "15px",
+                "text-align": "right",
+            }
+        )
+        .set_properties(
+            subset=["テーマ"],
+            **{
+                "text-align": "center",
+                "font-weight": "bold",
+            }
+        )
     )
 
-    for ticker, label, df, cur in items:
-        if ticker != selected:
-            continue
-
-        perf, day_perf = calc_perf(df["Close"])
-        latest = df["Close"].iloc[-1]
-
-        render_title(ticker, label, df)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("現在値", f"{latest:,.2f} {cur}")
-        c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
-        c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
-
-        tab1, tab2 = st.tabs(["Price", "MACD / RSI"])
-
-        with tab1:
-            st.plotly_chart(
-                make_price_chart(df, cur),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
-
-        with tab2:
-            st.plotly_chart(
-                make_macd_rsi_chart(df),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+    )
