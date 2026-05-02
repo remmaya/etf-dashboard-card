@@ -460,10 +460,10 @@ elif view_mode == "翌日更新予測":
     ]
 
 
-        ticker = label_to_ticker.get(row["テーマ"])
-        color = THEME_COLORS.get(ticker)
+    ticker = label_to_ticker.get(row["テーマ"])
+    color = THEME_COLORS.get(ticker)
 
-        styles = [""] * len(row)
+    styles = [""] * len(row)
 
         if color:
             styles[0] = f"background-color: {color}; color: black; font-weight: bold;"
