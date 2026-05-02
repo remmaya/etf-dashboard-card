@@ -499,7 +499,7 @@ elif view_mode == "翌日更新予測":
         .apply(theme_bg, axis=1)
         .set_properties(
             **{
-                "font-size": "15px",
+                "font-size": "18px",
                 "text-align": "right",
             }
         )
@@ -512,8 +512,9 @@ elif view_mode == "翌日更新予測":
         )
     )
 
-    st.dataframe(
-        styled,
-        use_container_width=True,
-        hide_index=True,
-    )
+st.dataframe(
+    styled,
+    use_container_width=False,  # ←ここを変更
+    width=800,                 # 好みで調整（700〜900くらい）
+    hide_index=True,
+)
