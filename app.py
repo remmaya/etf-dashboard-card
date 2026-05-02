@@ -499,7 +499,7 @@ elif view_mode == "翌日更新予測":
         .apply(theme_bg, axis=1)
         .set_properties(
             **{
-                "font-size": "18px",
+                "font-size": "28px",
                 "text-align": "right",
             }
         )
