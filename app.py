@@ -493,28 +493,103 @@ elif view_mode == "翌日更新予測":
 
         return styles
 
-    styled = (
-        table_df.style
-        .map(color_sign, subset=["変動", "dポ投資", "予想損益"])
-        .apply(theme_bg, axis=1)
-        .set_properties(
-            **{
-                "font-size": "28px",
-                "text-align": "right",
-            }
-        )
-        .set_properties(
-            subset=["テーマ"],
-            **{
-                "text-align": "center",
-                "font-weight": "bold",
-            }
-        )
-    )
+    def sign_class(val):
+        text = str(val).replace("%", "").replace(",", "")
+        try:
+            num = float(text)
+        except ValueError:
+            return ""
 
-st.dataframe(
-    styled,
-    use_container_width=False,  # ←ここを変更
-    width=800,                 # 好みで調整（700〜900くらい）
-    hide_index=True,
-)
+        if num > 0:
+            return "pos"
+        elif num < 0:
+            return "neg"
+        return ""
+
+    label_to_ticker = {
+        "クリエネ": "ICLN",
+        "新興国": "IEMG",
+        "コミュ": "IXP",
+        "生活必需品": "KXI",
+        "ヘルスケア": "IXJ",
+        "ゴールド": "IAU",
+        "SDGs": "SDG",
+        "米国大型株": "IVV",
+    }
+
+    rows_html = ""
+
+    for _, row in table_df.iterrows():
+        ticker = label_to_ticker.get(row["テーマ"])
+        theme_color = THEME_COLORS.get(ticker, "#EEEEEE")
+
+        rows_html += f"""
+        <tr>
+            <td class="theme" style="background-color:{theme_color};">{row["テーマ"]}</td>
+            <td>{row["昨日"]}</td>
+            <td>{row["現在"]}</td>
+            <td class="{sign_class(row["変動"])}">{row["変動"]}</td>
+            <td class="{sign_class(row["dポ投資"])}">{row["dポ投資"]}</td>
+            <td class="{sign_class(row["予想損益"])}">{row["予想損益"]}</td>
+        </tr>
+        """
+
+    table_html = f"""
+    <style>
+    .prediction-table {{
+        border-collapse: collapse;
+        font-size: 22px;
+        line-height: 1.35;
+        margin-top: 12px;
+        width: 760px;
+    }}
+
+    .prediction-table th,
+    .prediction-table td {{
+        border: 1px solid #bbb;
+        padding: 8px 14px;
+        text-align: right;
+        white-space: nowrap;
+    }}
+
+    .prediction-table th {{
+        background-color: #f0f0f0;
+        text-align: center;
+        font-weight: 700;
+    }}
+
+    .prediction-table .theme {{
+        color: black;
+        text-align: center;
+        font-weight: 700;
+    }}
+
+    .prediction-table .pos {{
+        color: red;
+        font-weight: 700;
+    }}
+
+    .prediction-table .neg {{
+        color: blue;
+        font-weight: 700;
+    }}
+    </style>
+
+    <table class="prediction-table">
+        <thead>
+            <tr>
+                <th>テーマ</th>
+                <th>昨日</th>
+                <th>現在</th>
+                <th>変動</th>
+                <th>dポ投資</th>
+                <th>予想損益</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+    """
+
+    st.markdown(table_html, unsafe_allow_html=True)
