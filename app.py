@@ -5,6 +5,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit.components.v1 as components
 
 from core import macd, rsi, slice_period, ETF_INFO
 
@@ -458,30 +459,6 @@ elif view_mode == "翌日更新予測":
         "予想損益",
     ]
 
-    def color_sign(val):
-        text = str(val).replace("%", "").replace(",", "")
-        try:
-            num = float(text)
-        except ValueError:
-            return ""
-
-        if num > 0:
-            return "color: red; font-weight: bold;"
-        elif num < 0:
-            return "color: blue; font-weight: bold;"
-        return ""
-
-    def theme_bg(row):
-        label_to_ticker = {
-            "クリエネ": "ICLN",
-            "新興国": "IEMG",
-            "コミュ": "IXP",
-            "生活必需品": "KXI",
-            "ヘルスケア": "IXJ",
-            "ゴールド": "IAU",
-            "SDGs": "SDG",
-            "米国大型株": "IVV",
-        }
 
         ticker = label_to_ticker.get(row["テーマ"])
         color = THEME_COLORS.get(ticker)
@@ -534,62 +511,66 @@ elif view_mode == "翌日更新予測":
         </tr>
         """
 
-    table_html = f"""
-    <style>
-    .prediction-table {{
-        border-collapse: collapse;
-        font-size: 22px;
-        line-height: 1.35;
-        margin-top: 12px;
-        width: 760px;
-    }}
+table_html = f"""
+<style>
+.prediction-table {{
+    border-collapse: collapse;
+    font-size: 22px;
+    line-height: 1.35;
+    margin-top: 12px;
+    width: 760px;
+}}
 
-    .prediction-table th,
-    .prediction-table td {{
-        border: 1px solid #bbb;
-        padding: 8px 14px;
-        text-align: right;
-        white-space: nowrap;
-    }}
+.prediction-table th,
+.prediction-table td {{
+    border: 1px solid #bbb;
+    padding: 8px 14px;
+    text-align: right;
+    white-space: nowrap;
+}}
 
-    .prediction-table th {{
-        background-color: #f0f0f0;
-        text-align: center;
-        font-weight: 700;
-    }}
+.prediction-table th {{
+    background-color: #f0f0f0;
+    text-align: center;
+    font-weight: 700;
+}}
 
-    .prediction-table .theme {{
-        color: black;
-        text-align: center;
-        font-weight: 700;
-    }}
+.prediction-table .theme {{
+    color: black;
+    text-align: center;
+    font-weight: 700;
+}}
 
-    .prediction-table .pos {{
-        color: red;
-        font-weight: 700;
-    }}
+.prediction-table .pos {{
+    color: red;
+    font-weight: 700;
+}}
 
-    .prediction-table .neg {{
-        color: blue;
-        font-weight: 700;
-    }}
-    </style>
+.prediction-table .neg {{
+    color: blue;
+    font-weight: 700;
+}}
+</style>
 
-    <table class="prediction-table">
-        <thead>
-            <tr>
-                <th>テーマ</th>
-                <th>昨日</th>
-                <th>現在</th>
-                <th>変動</th>
-                <th>dポ投資</th>
-                <th>予想損益</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows_html}
-        </tbody>
-    </table>
-    """
+<table class="prediction-table">
+<thead>
+<tr>
+<th>テーマ</th>
+<th>昨日</th>
+<th>現在</th>
+<th>変動</th>
+<th>dポ投資</th>
+<th>予想損益</th>
+</tr>
+</thead>
+<tbody>
+{rows_html}
+</tbody>
+</table>
+"""
 
-    st.markdown(table_html, unsafe_allow_html=True)
+components.html(
+    table_html,
+    height=420,
+    scrolling=False,
+)
