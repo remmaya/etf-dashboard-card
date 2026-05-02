@@ -425,21 +425,6 @@ elif view_mode == "翌日更新予測":
     else:
         m3.metric("全体予測騰落率", "-")
 
-    st.markdown("---")
-
-    for row in pred_rows:
-        ticker = row["ticker"]
-        label_text = (
-            f"{row['テーマ']}｜"
-            f"{row['予測騰落率']:+.2f}%｜"
-            f"{row['投入pt']:,.0f}pt → "
-            f"{row['予測更新後pt']:,.0f}pt "
-            f"({row['予測変動pt']:+,.0f}pt)"
-        )
-
-        render_colored_label(ticker, label_text)
-
-        st.markdown("---")
 
     table_df = pd.DataFrame(pred_rows)
 
