@@ -426,7 +426,6 @@ elif view_mode == "翌日更新予測":
     else:
         m3.metric("全体予測騰落率", "-")
 
-
     table_df = pd.DataFrame(pred_rows)
 
     table_df["ETF変動率"] = (
@@ -458,17 +457,6 @@ elif view_mode == "翌日更新予測":
         "dポ投資",
         "予想損益",
     ]
-
-
-    ticker = label_to_ticker.get(row["テーマ"])
-    color = THEME_COLORS.get(ticker)
-
-    styles = [""] * len(row)
-
-    if color:
-        styles[0] = f"background-color: {color}; color: black; font-weight: bold;"
-
-    return styles
 
     def sign_class(val):
         text = str(val).replace("%", "").replace(",", "")
@@ -511,7 +499,7 @@ elif view_mode == "翌日更新予測":
         </tr>
         """
 
-table_html = f"""
+    table_html = f"""
 <style>
 .prediction-table {{
     border-collapse: collapse;
@@ -569,8 +557,8 @@ table_html = f"""
 </table>
 """
 
-components.html(
-    table_html,
-    height=420,
-    scrolling=False,
-)
+    components.html(
+        table_html,
+        height=420,
+        scrolling=False,
+    )
