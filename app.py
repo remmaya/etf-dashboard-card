@@ -1,4 +1,6 @@
 # app.py
+from io import StringIO
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -15,16 +17,33 @@ DISPLAY_LABELS = {
 }
 
 THEME_COLORS = {
-    "ICLN": "#8FD19E",     # クリエネ
-    "IEMG": "#F28B82",    # 新興国
-    "IXP": "#C5B3E6",     # コミュ
-    "IXJ": "#8FD3C7",     # ヘルスケア
-    "KXI": "#9ECAE1",     # 生活必需品
-    "IAU": "#FFE066",     # ゴールド
-    "SDG": "#00C853",     # SDGs
-    "IVV": "#8DA0CB",     # 米国大型株
+    "ICLN": "#8FD19E",
+    "IEMG": "#F28B82",
+    "IXP": "#C5B3E6",
+    "IXJ": "#8FD3C7",
+    "KXI": "#9ECAE1",
+    "IAU": "#FFE066",
+    "SDG": "#00C853",
+    "IVV": "#8DA0CB",
     "USDJPY=X": "#CCCCCC",
 }
+
+# Excelの投入pt行の並び
+# クリエネ, 新興国, コミュ, 生活必需品, ヘルスケア,
+# ゴールド, SDGs, 日経, 日経Inv, おまかせ, 米国大型株
+POINT_ORDER = [
+    "ICLN",
+    "IEMG",
+    "IXP",
+    "KXI",
+    "IXJ",
+    "IAU",
+    "SDG",
+    None,
+    None,
+    None,
+    "IVV",
+]
 
 st.set_page_config(page_title="ETF Dashboard", layout="wide")
 
@@ -36,7 +55,7 @@ with st.sidebar:
 
     view_mode = st.radio(
         "表示内容",
-        ["3×3 Price", "3×3 MACD+RSI", "Card Detail"],
+        ["3×3 Price", "3×3 MACD+RSI", "翌日更新予測", "Card Detail"],
         index=0,
     )
 
@@ -87,6 +106,25 @@ def calc_perf(series):
     return period_perf, day_perf
 
 
+def parse_latest_points_row(text):
+    if not text.strip():
+        return {}
+
+    values = text.strip().replace("\n", "\t").split("\t")
+    points = {}
+
+    for ticker, value in zip(POINT_ORDER, values):
+        if ticker is None:
+            continue
+
+        try:
+            points[ticker] = int(float(str(value).replace(",", "")))
+        except ValueError:
+            points[ticker] = 0
+
+    return points
+
+
 def make_title(ticker, label, df):
     perf, day_perf = calc_perf(df["Close"])
 
@@ -116,6 +154,27 @@ def render_title(ticker, label, df):
             font-size: 0.95rem;
         ">
             {title}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_colored_label(ticker, text):
+    color = THEME_COLORS.get(ticker, "#999999")
+
+    st.markdown(
+        f"""
+        <div style="
+            background-color: {color};
+            color: black;
+            font-weight: 700;
+            padding: 6px 10px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 0.95rem;
+        ">
+            {text}
         </div>
         """,
         unsafe_allow_html=True,
@@ -223,8 +282,47 @@ def make_macd_rsi_chart(df):
     return fig
 
 
+def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map):
+    rows = []
+
+    for ticker in TARGET_ETFS:
+        if ticker not in raw.columns:
+            continue
+
+        series = raw[ticker].dropna()
+        if len(series) < 2:
+            continue
+
+        prev_usd = series.iloc[-2]
+        current_usd = series.iloc[-1]
+
+        prev_jpy = prev_usd * prev_ttm
+        current_jpy = current_usd * current_fx
+
+        pred_pct = (current_jpy / prev_jpy - 1) * 100
+        points = points_map.get(ticker, 0)
+        pred_pt = points * pred_pct / 100
+        after_pt = points + pred_pt
+
+        rows.append(
+            {
+                "ticker": ticker,
+                "テーマ": DISPLAY_LABELS.get(ticker, ticker),
+                "予測騰落率": pred_pct,
+                "投入pt": points,
+                "予測変動pt": pred_pt,
+                "予測更新後pt": after_pt,
+                "ETF現在値": current_usd,
+                "ETF前回値": prev_usd,
+            }
+        )
+
+    return rows
+
+
 raw = load_data()
 fx = raw["USDJPY=X"].dropna() if "USDJPY=X" in raw.columns else pd.Series(dtype=float)
+current_fx = fx.iloc[-1] if not fx.empty else None
 
 items = []
 
@@ -245,7 +343,9 @@ for ticker in DISPLAY_ITEMS:
 
 if sort_mode == "騰落率順":
     items.sort(
-        key=lambda x: calc_perf(x[2]["Close"])[0] if calc_perf(x[2]["Close"])[0] is not None else -9999,
+        key=lambda x: calc_perf(x[2]["Close"])[0]
+        if calc_perf(x[2]["Close"])[0] is not None
+        else -9999,
         reverse=True,
     )
 
@@ -262,6 +362,7 @@ if view_mode == "3×3 Price":
                 config={"displayModeBar": False},
             )
 
+
 elif view_mode == "3×3 MACD+RSI":
     cols = st.columns(3)
 
@@ -273,6 +374,95 @@ elif view_mode == "3×3 MACD+RSI":
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
+
+
+elif view_mode == "翌日更新予測":
+    st.markdown("### 翌日夕方更新予測")
+
+    if current_fx is None:
+        st.error("USDJPY=X を取得できませんでした。")
+        st.stop()
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        prev_ttm = st.number_input(
+            "前回仲値（USD/JPY）",
+            min_value=0.0,
+            value=float(round(current_fx, 2)),
+            step=0.01,
+            format="%.2f",
+        )
+
+    with c2:
+        st.metric("現在ドル円（API）", f"{current_fx:.2f}")
+
+    point_text = st.text_area(
+        "最新行の投入ポイントをExcelから貼り付け",
+        height=80,
+        placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
+    )
+
+    points_map = parse_latest_points_row(point_text)
+
+    pred_rows = calc_next_update_predictions(
+        raw=raw,
+        prev_ttm=prev_ttm,
+        current_fx=current_fx,
+        points_map=points_map,
+    )
+
+    pred_rows.sort(key=lambda x: x["予測騰落率"], reverse=True)
+
+    total_points = sum(r["投入pt"] for r in pred_rows)
+    total_change = sum(r["予測変動pt"] for r in pred_rows)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("投入pt合計", f"{total_points:,.0f}")
+    m2.metric("予測変動pt合計", f"{total_change:+,.0f}")
+    if total_points:
+        m3.metric("全体予測騰落率", f"{total_change / total_points * 100:+.2f}%")
+    else:
+        m3.metric("全体予測騰落率", "-")
+
+    st.markdown("---")
+
+    for row in pred_rows:
+        ticker = row["ticker"]
+        label_text = (
+            f"{row['テーマ']}｜"
+            f"{row['予測騰落率']:+.2f}%｜"
+            f"{row['投入pt']:,.0f}pt → "
+            f"{row['予測更新後pt']:,.0f}pt "
+            f"({row['予測変動pt']:+,.0f}pt)"
+        )
+
+        render_colored_label(ticker, label_text)
+
+    st.markdown("---")
+
+    table_df = pd.DataFrame(pred_rows)
+    table_df = table_df[
+        [
+            "テーマ",
+            "予測騰落率",
+            "投入pt",
+            "予測変動pt",
+            "予測更新後pt",
+            "ETF前回値",
+            "ETF現在値",
+        ]
+    ]
+
+    table_df["予測騰落率"] = table_df["予測騰落率"].map(lambda x: f"{x:+.2f}%")
+    table_df["投入pt"] = table_df["投入pt"].map(lambda x: f"{x:,.0f}")
+    table_df["予測変動pt"] = table_df["予測変動pt"].map(lambda x: f"{x:+,.0f}")
+    table_df["予測更新後pt"] = table_df["予測更新後pt"].map(lambda x: f"{x:,.0f}")
+    table_df["ETF前回値"] = table_df["ETF前回値"].map(lambda x: f"{x:,.2f}")
+    table_df["ETF現在値"] = table_df["ETF現在値"].map(lambda x: f"{x:,.2f}")
+
+    st.dataframe(table_df, use_container_width=True, hide_index=True)
+
 
 else:
     selected = st.selectbox(
