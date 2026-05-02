@@ -465,10 +465,10 @@ elif view_mode == "翌日更新予測":
 
     styles = [""] * len(row)
 
-        if color:
-            styles[0] = f"background-color: {color}; color: black; font-weight: bold;"
+    if color:
+        styles[0] = f"background-color: {color}; color: black; font-weight: bold;"
 
-        return styles
+    return styles
 
     def sign_class(val):
         text = str(val).replace("%", "").replace(",", "")
