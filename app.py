@@ -515,45 +515,45 @@ elif view_mode == "翌日更新予測":
         </tr>
         """
 
-    table_html = f"""
+    table_template = """
 <style>
-.prediction-table {{
+.prediction-table {
     border-collapse: collapse;
     font-size: 22px;
     line-height: 1.35;
     margin-top: 12px;
-    width: 760px;
-}}
+    width: 860px;
+}
 
 .prediction-table th,
-.prediction-table td {{
+.prediction-table td {
     border: 1px solid #bbb;
     padding: 8px 14px;
     text-align: right;
     white-space: nowrap;
-}}
+}
 
-.prediction-table th {{
+.prediction-table th {
     background-color: #f0f0f0;
     text-align: center;
     font-weight: 700;
-}}
+}
 
-.prediction-table .theme {{
+.prediction-table .theme {
     color: black;
     text-align: center;
     font-weight: 700;
-}}
+}
 
-.prediction-table .pos {{
+.prediction-table .pos {
     color: red;
     font-weight: 700;
-}}
+}
 
-.prediction-table .neg {{
+.prediction-table .neg {
     color: blue;
     font-weight: 700;
-}}
+}
 </style>
 
 <table class="prediction-table">
@@ -569,10 +569,12 @@ elif view_mode == "翌日更新予測":
 </tr>
 </thead>
 <tbody>
-{rows_html}
+__ROWS__
 </tbody>
 </table>
 """
+
+    table_html = table_template.replace("__ROWS__", rows_html)
 
     components.html(
         table_html,
