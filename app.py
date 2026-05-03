@@ -546,7 +546,7 @@ body {
     border-collapse: collapse;
     background: #ffffff !important;
     color: #111111 !important;
-    font-size: 22px;
+    font-size: 16px;
     line-height: 1.35;
     margin-top: 12px;
     width: 960px;
