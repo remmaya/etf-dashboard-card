@@ -503,8 +503,10 @@ elif view_mode == "翌日更新予測":
         theme_color = THEME_COLORS.get(ticker, "#EEEEEE")
 
         rows_html += f"""
+        rows_html += f"""
         <tr>
             <td class="theme" style="background-color:{theme_color};">{row["テーマ"]}</td>
+            <td>{row["投入pt"]}</td>
             <td>{row["昨日"]}</td>
             <td>{row["現在"]}</td>
             <td class="{sign_class(row["変動"])}">{row["変動"]}</td>
@@ -558,6 +560,7 @@ elif view_mode == "翌日更新予測":
 <thead>
 <tr>
 <th>テーマ</th>
+<th>投入pt</th>
 <th>昨日</th>
 <th>現在</th>
 <th>変動</th>
