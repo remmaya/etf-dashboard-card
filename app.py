@@ -614,27 +614,28 @@ __ROWS__
 
 elif view_mode == "Card Detail":
     for ticker, label, df, cur in items:
-        render_title(ticker, label, df)
+        with st.container(border=True):
+            render_title(ticker, label, df)
 
-        latest = df["Close"].iloc[-1]
-        perf, day_perf = calc_perf(df["Close"])
+            latest = df["Close"].iloc[-1]
+            perf, day_perf = calc_perf(df["Close"])
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("現在値", f"{latest:,.2f} {cur}")
-        c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
-        c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("現在値", f"{latest:,.2f} {cur}")
+            c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
+            c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
 
-        st.plotly_chart(
-            make_price_chart(df, cur),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
-
-        if ticker != "USDJPY=X":
             st.plotly_chart(
-                make_macd_rsi_chart(df),
+                make_price_chart(df, cur),
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
 
-        st.markdown("---")
+            if ticker != "USDJPY=X":
+                st.plotly_chart(
+                    make_macd_rsi_chart(df),
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
+
+        st.write("")
