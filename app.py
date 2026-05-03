@@ -425,7 +425,17 @@ elif view_mode == "翌日更新予測":
         points_map=points_map,
     )
 
-    pred_rows.sort(key=lambda x: x["予測騰落率"], reverse=True)
+    PREDICTION_ORDER = [
+    "USDJPY=X",
+    "ICLN",
+    "IEMG",
+    "IXP",
+    "IXJ",
+    "KXI",
+    "IAU",
+    "SDG",
+    "IVV",
+    ]
 
     total_points = sum(r["投入pt"] for r in pred_rows)
     total_change = sum(r["予測変動pt"] for r in pred_rows)
@@ -438,62 +448,54 @@ elif view_mode == "翌日更新予測":
     else:
         m3.metric("全体予測騰落率", "-")
 
-    table_df = pd.DataFrame(pred_rows)
+        pred_map = {row["ticker"]: row for row in pred_rows}
 
-    table_df["ETF変動率"] = (
-        (table_df["ETF現在値"] / table_df["ETF前回値"] - 1) * 100
-    )
+    table_rows = []
 
-    table_df = table_df[
-        [
-            "テーマ",
-            "ETF前回値",
-            "ETF現在値",
-            "ETF変動率",
-            "予測騰落率",
-            "予測変動pt",
-        ]
-    ]
+    # ドル円行
+    if len(fx.dropna()) >= 2:
+        prev_fx = fx.dropna().iloc[-2]
+        now_fx = fx.dropna().iloc[-1]
+        fx_change = (now_fx / prev_fx - 1) * 100
 
-    table_df["ETF前回値"] = table_df["ETF前回値"].map(lambda x: f"{x:,.2f}")
-    table_df["ETF現在値"] = table_df["ETF現在値"].map(lambda x: f"{x:,.2f}")
-    table_df["ETF変動率"] = table_df["ETF変動率"].map(lambda x: f"{x:+.2f}%")
-    table_df["予測騰落率"] = table_df["予測騰落率"].map(lambda x: f"{x:+.2f}%")
-    table_df["予測変動pt"] = table_df["予測変動pt"].map(lambda x: f"{x:+,.0f}")
+        table_rows.append(
+            {
+                "ticker": "USDJPY=X",
+                "テーマ": "ドル円",
+                "投入pt": "",
+                "昨日": f"{prev_fx:,.2f}",
+                "現在": f"{now_fx:,.2f}",
+                "変動": f"{fx_change:+.2f}%",
+                "dポ投資": "",
+                "予想損益": "",
+            }
+        )
 
-    table_df.columns = [
-        "テーマ",
-        "昨日",
-        "現在",
-        "変動",
-        "dポ投資",
-        "予想損益",
-    ]
+    # ETF行
+    for ticker in PREDICTION_ORDER:
+        if ticker == "USDJPY=X":
+            continue
 
-    def sign_class(val):
-        text = str(val).replace("%", "").replace(",", "")
-        try:
-            num = float(text)
-        except ValueError:
-            return ""
+        row = pred_map.get(ticker)
+        if row is None:
+            continue
 
-        if num > 0:
-            return "pos"
-        elif num < 0:
-            return "neg"
-        return ""
+        etf_change = (row["ETF現在値"] / row["ETF前回値"] - 1) * 100
 
-    label_to_ticker = {
-        "クリエネ": "ICLN",
-        "新興国": "IEMG",
-        "コミュ": "IXP",
-        "生活必需品": "KXI",
-        "ヘルスケア": "IXJ",
-        "ゴールド": "IAU",
-        "SDGs": "SDG",
-        "米国大型株": "IVV",
-    }
+        table_rows.append(
+            {
+                "ticker": ticker,
+                "テーマ": row["テーマ"],
+                "投入pt": f"{row['投入pt']:,.0f}",
+                "昨日": f"{row['ETF前回値']:,.2f}",
+                "現在": f"{row['ETF現在値']:,.2f}",
+                "変動": f"{etf_change:+.2f}%",
+                "dポ投資": f"{row['予測騰落率']:+.2f}%",
+                "予想損益": f"{row['予測変動pt']:+,.0f}",
+            }
+        )
 
+    table_df = pd.DataFrame(table_rows)
     rows_html = ""
 
     for _, row in table_df.iterrows():
