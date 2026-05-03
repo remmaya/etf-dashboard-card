@@ -549,7 +549,7 @@ body {
     font-size: 16px;
     line-height: 1.35;
     margin-top: 12px;
-    width: 960px;
+    width: 800px;
 }
 
 .prediction-table th,
