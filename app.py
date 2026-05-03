@@ -528,8 +528,24 @@ elif view_mode == "翌日更新予測":
 
     table_template = """
 <style>
+html,
+body {
+    background: #ffffff !important;
+    color: #111111 !important;
+    margin: 0;
+    padding: 0;
+}
+
+.prediction-wrap {
+    background: #ffffff !important;
+    color: #111111 !important;
+    padding: 8px;
+}
+
 .prediction-table {
     border-collapse: collapse;
+    background: #ffffff !important;
+    color: #111111 !important;
     font-size: 22px;
     line-height: 1.35;
     margin-top: 12px;
@@ -539,34 +555,36 @@ elif view_mode == "翌日更新予測":
 .prediction-table th,
 .prediction-table td {
     border: 1px solid #bbb;
+    color: #111111 !important;
     padding: 8px 14px;
     text-align: right;
     white-space: nowrap;
 }
 
 .prediction-table th {
-    background-color: #f0f0f0;
+    background-color: #f0f0f0 !important;
     text-align: center;
     font-weight: 700;
 }
 
 .prediction-table .theme {
-    color: black;
+    color: #111111 !important;
     text-align: center;
     font-weight: 700;
 }
 
 .prediction-table .pos {
-    color: red;
+    color: red !important;
     font-weight: 700;
 }
 
 .prediction-table .neg {
-    color: blue;
+    color: blue !important;
     font-weight: 700;
 }
 </style>
 
+<div class="prediction-wrap">
 <table class="prediction-table">
 <thead>
 <tr>
@@ -583,6 +601,7 @@ elif view_mode == "翌日更新予測":
 __ROWS__
 </tbody>
 </table>
+</div>
 """
 
     table_html = table_template.replace("__ROWS__", rows_html)
@@ -592,3 +611,30 @@ __ROWS__
         height=560,
         scrolling=False,
     )
+
+elif view_mode == "Card Detail":
+    for ticker, label, df, cur in items:
+        render_title(ticker, label, df)
+
+        latest = df["Close"].iloc[-1]
+        perf, day_perf = calc_perf(df["Close"])
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("現在値", f"{latest:,.2f} {cur}")
+        c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
+        c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
+
+        st.plotly_chart(
+            make_price_chart(df, cur),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+
+        if ticker != "USDJPY=X":
+            st.plotly_chart(
+                make_macd_rsi_chart(df),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
+
+        st.markdown("---")
