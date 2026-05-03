@@ -453,10 +453,10 @@ elif view_mode == "翌日更新予測":
     table_rows = []
 
     if len(fx.dropna()) >= 2:
-        prev_fx = fx.dropna().iloc[-2]
-        now_fx = fx.dropna().iloc[-1]
+        prev_fx = prev_ttm
+        now_fx = current_fx
         fx_change = (now_fx / prev_fx - 1) * 100
-
+       
         table_rows.append(
             {
                 "ticker": "USDJPY=X",
