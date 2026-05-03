@@ -426,16 +426,18 @@ elif view_mode == "翌日更新予測":
     )
 
     PREDICTION_ORDER = [
-    "USDJPY=X",
-    "ICLN",
-    "IEMG",
-    "IXP",
-    "IXJ",
-    "KXI",
-    "IAU",
-    "SDG",
-    "IVV",
+        "USDJPY=X",
+        "ICLN",
+        "IEMG",
+        "IXP",
+        "IXJ",
+        "KXI",
+        "IAU",
+        "SDG",
+        "IVV",
     ]
+
+    pred_map = {row["ticker"]: row for row in pred_rows}
 
     total_points = sum(r["投入pt"] for r in pred_rows)
     total_change = sum(r["予測変動pt"] for r in pred_rows)
@@ -448,11 +450,8 @@ elif view_mode == "翌日更新予測":
     else:
         m3.metric("全体予測騰落率", "-")
 
-        pred_map = {row["ticker"]: row for row in pred_rows}
-
     table_rows = []
 
-    # ドル円行
     if len(fx.dropna()) >= 2:
         prev_fx = fx.dropna().iloc[-2]
         now_fx = fx.dropna().iloc[-1]
@@ -471,7 +470,6 @@ elif view_mode == "翌日更新予測":
             }
         )
 
-    # ETF行
     for ticker in PREDICTION_ORDER:
         if ticker == "USDJPY=X":
             continue
@@ -496,24 +494,37 @@ elif view_mode == "翌日更新予測":
         )
 
     table_df = pd.DataFrame(table_rows)
+
+    def sign_class(val):
+        text = str(val).replace("%", "").replace(",", "")
+        try:
+            num = float(text)
+        except ValueError:
+            return ""
+
+        if num > 0:
+            return "pos"
+        if num < 0:
+            return "neg"
+        return ""
+
     rows_html = ""
 
     for _, row in table_df.iterrows():
-        ticker = label_to_ticker.get(row["テーマ"])
+        ticker = row["ticker"]
         theme_color = THEME_COLORS.get(ticker, "#EEEEEE")
 
         rows_html += f"""
-        rows_html += f"""
-        <tr>
-            <td class="theme" style="background-color:{theme_color};">{row["テーマ"]}</td>
-            <td>{row["投入pt"]}</td>
-            <td>{row["昨日"]}</td>
-            <td>{row["現在"]}</td>
-            <td class="{sign_class(row["変動"])}">{row["変動"]}</td>
-            <td class="{sign_class(row["dポ投資"])}">{row["dポ投資"]}</td>
-            <td class="{sign_class(row["予想損益"])}">{row["予想損益"]}</td>
-        </tr>
-        """
+<tr>
+    <td class="theme" style="background-color:{theme_color};">{row["テーマ"]}</td>
+    <td>{row["投入pt"]}</td>
+    <td>{row["昨日"]}</td>
+    <td>{row["現在"]}</td>
+    <td class="{sign_class(row["変動"])}">{row["変動"]}</td>
+    <td class="{sign_class(row["dポ投資"])}">{row["dポ投資"]}</td>
+    <td class="{sign_class(row["予想損益"])}">{row["予想損益"]}</td>
+</tr>
+"""
 
     table_template = """
 <style>
@@ -522,7 +533,7 @@ elif view_mode == "翌日更新予測":
     font-size: 22px;
     line-height: 1.35;
     margin-top: 12px;
-    width: 860px;
+    width: 960px;
 }
 
 .prediction-table th,
@@ -578,6 +589,6 @@ __ROWS__
 
     components.html(
         table_html,
-        height=500,
+        height=560,
         scrolling=False,
     )
