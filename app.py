@@ -384,16 +384,25 @@ elif view_mode == "翌日更新予測":
         st.error("USDJPY=X を取得できませんでした。")
         st.stop()
 
+    # セッション内で前回入力を保持
+    if "prev_ttm" not in st.session_state:
+        st.session_state["prev_ttm"] = float(round(current_fx, 2))
+
+    if "point_text" not in st.session_state:
+        st.session_state["point_text"] = ""
+
     c1, c2 = st.columns(2)
 
     with c1:
         prev_ttm = st.number_input(
             "前回仲値（USD/JPY）",
             min_value=0.0,
-            value=float(round(current_fx, 2)),
+            value=st.session_state["prev_ttm"],
             step=0.01,
             format="%.2f",
+            key="prev_ttm_input",
         )
+        st.session_state["prev_ttm"] = prev_ttm
 
     with c2:
         st.metric("現在ドル円（API）", f"{current_fx:.2f}")
@@ -401,8 +410,11 @@ elif view_mode == "翌日更新予測":
     point_text = st.text_area(
         "最新行の投入ポイントをExcelから貼り付け",
         height=80,
+        value=st.session_state["point_text"],
         placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
+        key="point_text_input",
     )
+    st.session_state["point_text"] = point_text
 
     points_map = parse_latest_points_row(point_text)
 
