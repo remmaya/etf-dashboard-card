@@ -487,14 +487,7 @@ elif view_mode == "翌日更新予測":
     total_points = sum(r["投入pt"] for r in pred_rows)
     total_change = sum(r["予測変動pt"] for r in pred_rows)
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("投入pt合計", f"{total_points:,.0f}")
-    m2.metric("予測変動pt合計", f"{total_change:+,.0f}")
-    if total_points:
-        m3.metric("全体予測騰落率", f"{total_change / total_points * 100:+.2f}%")
-    else:
-        m3.metric("全体予測騰落率", "-")
-
+    
     st.caption(
         f"前回基準日: {base_date} ／ 現在ドル円使用値: {current_fx_used:.2f}（API値: {current_fx:.2f}）"
     )
@@ -574,6 +567,20 @@ elif view_mode == "翌日更新予測":
     <td class="{sign_class(row["予想損益"])}">{row["予想損益"]}</td>
 </tr>
 """
+    total_pct = total_change / total_points * 100 if total_points else 0
+
+    rows_html += f"""
+<tr class="total-row">
+    <td class="theme total-theme">合計</td>
+    <td>{total_points:,.0f}</td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td class="{sign_class(total_pct)}">{total_pct:+.2f}%</td>
+    <td class="{sign_class(total_change)}">{total_change:+,.0f}</td>
+</tr>
+"""
+
 
     table_template = """
 <style>
@@ -625,6 +632,18 @@ body {
     color: blue !important;
     font-weight: 700;
 }
+
+.prediction-table .total-row td {
+    background-color: #f5f5f5 !important;
+    font-weight: 700;
+    border-top: 3px solid #777;
+}
+
+.prediction-table .total-theme {
+    background-color: #e0e0e0 !important;
+    color: black !important;
+}
+
 </style>
 
 <table class="prediction-table">
