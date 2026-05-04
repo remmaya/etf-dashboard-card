@@ -283,7 +283,7 @@ def make_macd_rsi_chart(df):
     return fig
 
 
-def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map):
+def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map, base_date):
     rows = []
 
     for ticker in TARGET_ETFS:
@@ -294,7 +294,13 @@ def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map):
         if len(series) < 2:
             continue
 
-        prev_usd = series.iloc[-2]
+        # 前回基準日以前の最新終値を「前回値」として使う
+        # GW・年末年始・日本祝日明け対策
+        base_series = series[series.index.date <= base_date]
+        if base_series.empty:
+            continue
+
+        prev_usd = base_series.iloc[-1]
         current_usd = series.iloc[-1]
 
         prev_jpy = prev_usd * prev_ttm
@@ -315,6 +321,7 @@ def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map):
                 "予測更新後pt": after_pt,
                 "ETF現在値": current_usd,
                 "ETF前回値": prev_usd,
+                "前回基準日": base_series.index[-1].date(),
             }
         )
 
@@ -388,10 +395,17 @@ elif view_mode == "翌日更新予測":
     if "prev_ttm" not in st.session_state:
         st.session_state["prev_ttm"] = float(round(current_fx, 2))
 
+    if "current_fx_used" not in st.session_state:
+        st.session_state["current_fx_used"] = float(round(current_fx, 2))
+
     if "point_text" not in st.session_state:
         st.session_state["point_text"] = ""
 
-    c1, c2 = st.columns(2)
+    default_base_date = raw.index[-2].date() if len(raw.index) >= 2 else raw.index[-1].date()
+    if "base_date" not in st.session_state:
+        st.session_state["base_date"] = default_base_date
+
+    c1, c2, c3 = st.columns(3)
 
     with c1:
         prev_ttm = st.number_input(
@@ -405,7 +419,37 @@ elif view_mode == "翌日更新予測":
         st.session_state["prev_ttm"] = prev_ttm
 
     with c2:
-        st.metric("現在ドル円（API）", f"{current_fx:.2f}")
+        use_api_fx = st.checkbox(
+            "現在ドル円にAPI値を使う",
+            value=True,
+            key="use_api_fx",
+        )
+
+        if use_api_fx:
+            current_fx_used = float(round(current_fx, 2))
+            st.session_state["current_fx_used"] = current_fx_used
+            st.metric("現在ドル円（使用値）", f"{current_fx_used:.2f}")
+        else:
+            current_fx_used = st.number_input(
+                "現在ドル円（使用値）",
+                min_value=0.0,
+                value=st.session_state["current_fx_used"],
+                step=0.01,
+                format="%.2f",
+                key="current_fx_used_input",
+            )
+            st.session_state["current_fx_used"] = current_fx_used
+
+        st.caption(f"API値: {current_fx:.2f}")
+
+    with c3:
+        base_date = st.date_input(
+            "前回基準日",
+            value=st.session_state["base_date"],
+            key="base_date_input",
+            help="通常日は前営業日、GW・年末年始・祝日明けはdポイント投資の前回更新に使われた基準日を選びます。",
+        )
+        st.session_state["base_date"] = base_date
 
     point_text = st.text_area(
         "最新行の投入ポイントをExcelから貼り付け",
@@ -421,8 +465,9 @@ elif view_mode == "翌日更新予測":
     pred_rows = calc_next_update_predictions(
         raw=raw,
         prev_ttm=prev_ttm,
-        current_fx=current_fx,
+        current_fx=current_fx_used,
         points_map=points_map,
+        base_date=base_date,
     )
 
     PREDICTION_ORDER = [
@@ -450,13 +495,17 @@ elif view_mode == "翌日更新予測":
     else:
         m3.metric("全体予測騰落率", "-")
 
+    st.caption(
+        f"前回基準日: {base_date} ／ 現在ドル円使用値: {current_fx_used:.2f}（API値: {current_fx:.2f}）"
+    )
+
     table_rows = []
 
     if len(fx.dropna()) >= 2:
         prev_fx = prev_ttm
-        now_fx = current_fx
+        now_fx = current_fx_used
         fx_change = (now_fx / prev_fx - 1) * 100
-       
+
         table_rows.append(
             {
                 "ticker": "USDJPY=X",
@@ -536,39 +585,33 @@ body {
     padding: 0;
 }
 
-.prediction-wrap {
-    background: #ffffff !important;
-    color: #111111 !important;
-    padding: 8px;
-}
-
 .prediction-table {
-    border-collapse: collapse;
     background: #ffffff !important;
     color: #111111 !important;
-    font-size: 16px;
+    border-collapse: collapse;
+    font-size: 22px;
     line-height: 1.35;
     margin-top: 12px;
-    width: 800px;
+    width: 960px;
 }
 
 .prediction-table th,
 .prediction-table td {
-    border: 1px solid #bbb;
     color: #111111 !important;
+    border: 1px solid #bbb;
     padding: 8px 14px;
     text-align: right;
     white-space: nowrap;
 }
 
 .prediction-table th {
-    background-color: #f0f0f0 !important;
+    background-color: #f0f0f0;
     text-align: center;
     font-weight: 700;
 }
 
 .prediction-table .theme {
-    color: #111111 !important;
+    color: black !important;
     text-align: center;
     font-weight: 700;
 }
@@ -584,7 +627,6 @@ body {
 }
 </style>
 
-<div class="prediction-wrap">
 <table class="prediction-table">
 <thead>
 <tr>
@@ -601,7 +643,6 @@ body {
 __ROWS__
 </tbody>
 </table>
-</div>
 """
 
     table_html = table_template.replace("__ROWS__", rows_html)
@@ -612,30 +653,30 @@ __ROWS__
         scrolling=False,
     )
 
+
 elif view_mode == "Card Detail":
     for ticker, label, df, cur in items:
-        with st.container(border=True):
-            render_title(ticker, label, df)
+        render_title(ticker, label, df)
 
-            latest = df["Close"].iloc[-1]
-            perf, day_perf = calc_perf(df["Close"])
+        latest = df["Close"].iloc[-1]
+        perf, day_perf = calc_perf(df["Close"])
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("現在値", f"{latest:,.2f} {cur}")
-            c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
-            c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("現在値", f"{latest:,.2f} {cur}")
+        c2.metric("期間騰落率", f"{perf:+.2f}%" if perf is not None else "-")
+        c3.metric("前日比", f"{day_perf:+.2f}%" if day_perf is not None else "-")
 
+        st.plotly_chart(
+            make_price_chart(df, cur),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+
+        if ticker != "USDJPY=X":
             st.plotly_chart(
-                make_price_chart(df, cur),
+                make_macd_rsi_chart(df),
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
 
-            if ticker != "USDJPY=X":
-                st.plotly_chart(
-                    make_macd_rsi_chart(df),
-                    use_container_width=True,
-                    config={"displayModeBar": False},
-                )
-
-        st.write("")
+        st.markdown("---")
