@@ -18,14 +18,14 @@ DISPLAY_LABELS = {
 }
 
 THEME_COLORS = {
-    "ICLN": "#8FD19E",
-    "IEMG": "#F28B82",
-    "IXP": "#C5B3E6",
-    "IXJ": "#8FD3C7",
-    "KXI": "#9ECAE1",
-    "IAU": "#FFE066",
-    "SDG": "#00C853",
-    "IVV": "#8DA0CB",
+    "ICLN": "#97e993",
+    "IEMG": "#ff8989",
+    "IXP": "#b9b8f0",
+    "IXJ": "#87d9d6",
+    "KXI": "#a7dcf5",
+    "IAU": "#dcda00",
+    "SDG": "#00dc1a",
+    "IVV": "#8ea9db",
     "USDJPY=X": "#CCCCCC",
 }
 
@@ -453,7 +453,7 @@ elif view_mode == "翌日更新予測":
 
     point_text = st.text_area(
         "最新行の投入ポイントをExcelから貼り付け",
-        height=80,
+        height=60,
         value=st.session_state["point_text"],
         placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
         key="point_text_input",
