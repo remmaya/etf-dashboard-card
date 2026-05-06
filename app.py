@@ -69,7 +69,6 @@ with st.sidebar:
     st.markdown("---")
     if st.button("🔄 データ更新"):
         st.cache_data.clear()
-        st.rerun()
 
 
 @st.cache_data(ttl=60 * 60 * 6)
@@ -459,10 +458,10 @@ elif view_mode == "翌日更新予測":
         st.session_state["base_date"] = base_date
 
     point_text = st.text_area(
-    "最新行の投入ポイントをExcelから貼り付け",
-    height=80,
-    placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
-    key="point_text",
+        "最新行の投入ポイントをExcelから貼り付け",
+        height=80,
+        placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
+        key="point_text",
     )
 
     points_map = parse_latest_points_row(point_text)
