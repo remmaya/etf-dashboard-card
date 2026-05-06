@@ -111,7 +111,14 @@ def parse_latest_points_row(text):
     if not text.strip():
         return {}
 
-    values = text.strip().replace("\n", "\t").split("\t")
+    normalized = (
+        text.strip()
+        .replace(",", "")
+        .replace("\n", "\t")
+        .replace(" ", "\t")
+    )
+
+    values = [v for v in normalized.split("\t") if v.strip()]
     points = {}
 
     for ticker, value in zip(POINT_ORDER, values):
@@ -119,7 +126,7 @@ def parse_latest_points_row(text):
             continue
 
         try:
-            points[ticker] = int(float(str(value).replace(",", "")))
+            points[ticker] = int(float(value))
         except ValueError:
             points[ticker] = 0
 
@@ -452,13 +459,11 @@ elif view_mode == "翌日更新予測":
         st.session_state["base_date"] = base_date
 
     point_text = st.text_area(
-        "最新行の投入ポイントをExcelから貼り付け",
-        height=60,
-        value=st.session_state["point_text"],
-        placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
-        key="point_text_input",
+    "最新行の投入ポイントをExcelから貼り付け",
+    height=80,
+    placeholder="32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
+    key="point_text",
     )
-    st.session_state["point_text"] = point_text
 
     points_map = parse_latest_points_row(point_text)
 
