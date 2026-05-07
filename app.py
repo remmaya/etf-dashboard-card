@@ -595,7 +595,7 @@ elif view_mode == "翌日更新予測":
 <style>
 html,
 body {
-    background: #ffffff !important;
+    background: transparent !important;
     color: #111111 !important;
     margin: 0;
     padding: 0;
