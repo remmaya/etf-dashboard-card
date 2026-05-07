@@ -447,7 +447,36 @@ elif view_mode == "翌日更新予測":
             st.session_state["current_fx_used"] = current_fx_used
 
         st.caption(f"API値: {current_fx:.2f}")
+       
+           # Excel「ETF値」タブ貼り付け用：現在値コピー
+        excel_copy_order = [
+            "USDJPY=X",
+            "ICLN",
+            "IEMG",
+            "IXP",
+            "IXJ",
+            "KXI",
+            "IAU",
+            "SDG",
+            "IVV",
+        ]
 
+        copy_values = []
+
+        for ticker in excel_copy_order:
+            if ticker == "USDJPY=X":
+                copy_values.append(f"{current_fx_used:.2f}")
+            else:
+                if ticker in raw.columns:
+                    s = raw[ticker].dropna()
+                    copy_values.append(f"{s.iloc[-1]:.2f}" if not s.empty else "")
+                else:
+                    copy_values.append("")
+
+        copy_text = "\t".join(copy_values)
+
+
+   
     with c3:
         base_date = st.date_input(
             "前回基準日",
