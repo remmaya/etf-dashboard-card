@@ -447,8 +447,8 @@ elif view_mode == "翌日更新予測":
             st.session_state["current_fx_used"] = current_fx_used
 
         st.caption(f"API値: {current_fx:.2f}")
-       
-           # Excel「ETF値」タブ貼り付け用：現在値コピー
+
+        # Excel「ETF値」タブ貼り付け用：現在値コピー
         excel_copy_order = [
             "USDJPY=X",
             "ICLN",
@@ -469,34 +469,43 @@ elif view_mode == "翌日更新予測":
             else:
                 if ticker in raw.columns:
                     s = raw[ticker].dropna()
-                    copy_values.append(f"{s.iloc[-1]:.2f}" if not s.empty else "")
+                    copy_values.append(
+                        f"{s.iloc[-1]:.2f}" if not s.empty else ""
+                    )
                 else:
                     copy_values.append("")
 
         copy_text = "\t".join(copy_values)
-           components.html(
-        f"""
-        <button
-            onclick="navigator.clipboard.writeText(`{copy_text}`)"
-            style="
-                font-size: 16px;
-                padding: 8px 14px;
-                border-radius: 8px;
-                border: 1px solid #999;
-                cursor: pointer;
-                background: #f5f5f5;
-                color: #111;
-                margin: 8px 0 12px 0;
-            "
-        >
-            Excel貼り付け用の現在値をコピー
-        </button>
-        <div style="font-size: 12px; color: #888;">
-            {copy_text}
-        </div>
-        """,
-        height=70,
-    )
+
+        components.html(
+            f"""
+            <button
+                onclick="navigator.clipboard.writeText(`{copy_text}`)"
+                style="
+                    font-size: 16px;
+                    padding: 8px 14px;
+                    border-radius: 8px;
+                    border: 1px solid #999;
+                    cursor: pointer;
+                    background: #f5f5f5;
+                    color: #111;
+                    margin: 8px 0 12px 0;
+                "
+            >
+                Excel貼り付け用の現在値をコピー
+            </button>
+
+            <div style="
+                font-size: 12px;
+                color: #888;
+                margin-bottom: 8px;
+                word-break: break-all;
+            ">
+                {copy_text}
+            </div>
+            """,
+            height=90,
+        )
 
 
    
