@@ -631,6 +631,19 @@ body {
     color: black !important;
     text-align: center;
     font-weight: 700;
+
+    position: sticky;
+    left: 0;
+    z-index: 2;
+
+    box-shadow: 2px 0 0 #bbb;
+}
+
+.prediction-table th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background-color: #f0f0f0;
 }
 
 .prediction-table .pos {
