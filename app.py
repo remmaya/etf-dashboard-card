@@ -474,6 +474,29 @@ elif view_mode == "翌日更新予測":
                     copy_values.append("")
 
         copy_text = "\t".join(copy_values)
+           components.html(
+        f"""
+        <button
+            onclick="navigator.clipboard.writeText(`{copy_text}`)"
+            style="
+                font-size: 16px;
+                padding: 8px 14px;
+                border-radius: 8px;
+                border: 1px solid #999;
+                cursor: pointer;
+                background: #f5f5f5;
+                color: #111;
+                margin: 8px 0 12px 0;
+            "
+        >
+            Excel貼り付け用の現在値をコピー
+        </button>
+        <div style="font-size: 12px; color: #888;">
+            {copy_text}
+        </div>
+        """,
+        height=70,
+    )
 
 
    
