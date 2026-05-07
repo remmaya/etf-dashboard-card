@@ -605,10 +605,11 @@ body {
     background: #ffffff !important;
     color: #111111 !important;
     border-collapse: collapse;
-    font-size: 22px;
+    font-size: 18px;
     line-height: 1.35;
     margin-top: 12px;
-    width: 960px;
+    width: max-content;
+    min-width: 860px;
 }
 
 .prediction-table th,
@@ -653,8 +654,15 @@ body {
     color: black !important;
 }
 
+.table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
 </style>
 
+<div class="table-wrap">
 <table class="prediction-table">
 <thead>
 <tr>
@@ -678,7 +686,7 @@ __ROWS__
     components.html(
         table_html,
         height=560,
-        scrolling=False,
+        scrolling=True,
     )
 
 
