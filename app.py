@@ -69,8 +69,6 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    if st.button("🔄 データ更新"):
-        st.cache_data.clear()
 
 
 @st.cache_data(ttl=60 * 60 * 6)
@@ -729,7 +727,25 @@ body {
 <thead>
 <tr>
 <th>テーマ</th>
-<th>投入pt</th>
+<th>
+    投入pt
+    <button
+        onclick="window.parent.location.reload()"
+        style="
+            margin-left: 10px;
+            font-size: 18px;
+            padding: 6px 10px;
+            border-radius: 5px;
+            border: 1px solid #999;
+            background: #ffffff;
+            color: #111111;
+            cursor: pointer;
+        "
+        title="Googleスプレッドシートを再読込"
+    >
+        🔄
+    </button>
+</th>
 <th>昨日</th>
 <th>
     <button
