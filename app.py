@@ -500,19 +500,6 @@ elif view_mode == "翌日更新予測":
         copy_text = "\t".join(copy_values)
 
         
-<div style="
-    font-size: 12px;
-    color: #888;
-    margin-bottom: 8px;
-    word-break: break-all;
-">
-            {copy_text}
-            </div>
-            """,
-            height=90,
-        )
-
-
    
     with c3:
         base_date = st.date_input(
