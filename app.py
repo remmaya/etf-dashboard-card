@@ -501,13 +501,13 @@ elif view_mode == "翌日更新予測":
 
         
 
-            <div style="
-                font-size: 12px;
-                color: #888;
-                margin-bottom: 8px;
-                word-break: break-all;
-            ">
-                {copy_text}
+        <div style="
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+            word-break: break-all;
+        ">
+            {copy_text}
             </div>
             """,
             height=90,
