@@ -46,6 +46,8 @@ POINT_ORDER = [
     "IVV",
 ]
 
+DPOINT_POINTS_CSV_URL = "DPOINT_POINTS_CSV_URL = "https://docs.google.com/spreadsheets/d/1Nr-e5iOt0j7i2njxQixPMSnky16KQqR_4REXHnxizsY/export?format=csv&gid=0""
+
 st.set_page_config(page_title="ETF Dashboard", layout="wide")
 
 with st.sidebar:
@@ -131,6 +133,26 @@ def parse_latest_points_row(text):
 
     return points
 
+@st.cache_data(ttl=60 * 5)
+def load_dpoint_points_from_sheet(url):
+    df = pd.read_csv(url, header=None)
+
+    # B2:K2 を読む
+    values = df.iloc[1, 1:11].tolist()
+
+    points_map = {}
+
+    for ticker, value in zip(POINT_ORDER, values):
+        if ticker is None:
+            continue
+
+        try:
+            text = str(value).replace(",", "").strip()
+            points_map[ticker] = int(float(text))
+        except Exception:
+            points_map[ticker] = 0
+
+    return points_map
 
 def make_title(ticker, label, df):
     perf, day_perf = calc_perf(df["Close"])
@@ -518,19 +540,15 @@ elif view_mode == "翌日更新予測":
         )
         st.session_state["base_date"] = base_date
 
-    point_text = st.text_area(
-    "最新行の投入ポイントをExcelから貼り付け",
-    height=80,
-    value=st.session_state.get(
-        "point_text",
-        "32,953\t0\t50,962\t49,815\t67,186\t45,868\t0\t0\t0\t130,335\t32,101",
-    ),
-    key="point_text_input",
-    )
+    try:
+        points_map = load_dpoint_points_from_sheet(DPOINT_POINTS_CSV_URL)
+        st.caption("投入pt: Googleスプレッドシート B2:K2 から読込")
+    except Exception as e:
+        st.error("投入ptのGoogleスプレッドシート読込に失敗しました。")
+        st.stop()
 
-    st.session_state["point_text"] = point_text
-
-    points_map = parse_latest_points_row(point_text)
+    if st.button("🔄 データ更新"):
+        st.cache_data.clear()
 
     pred_rows = calc_next_update_predictions(
         raw=raw,
