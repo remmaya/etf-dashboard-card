@@ -69,7 +69,8 @@ with st.sidebar:
     )
 
     st.markdown("---")
-
+    if st.button("🔄 データ更新"):
+        st.cache_data.clear()
 
 @st.cache_data(ttl=60 * 60 * 6)
 def load_data():
@@ -508,15 +509,21 @@ elif view_mode == "翌日更新予測":
         )
         st.session_state["base_date"] = base_date
 
+    col_pt, col_info = st.columns([1, 5])
+
+    with col_pt:
+        if st.button("投入pt更新"):
+            load_dpoint_points_from_sheet.clear()
+            st.rerun()
+
+    with col_info:
+        st.caption("投入pt: Googleスプレッドシート B2:K2 から読込")
+
     try:
         points_map = load_dpoint_points_from_sheet(DPOINT_POINTS_CSV_URL)
-        st.caption("投入pt: Googleスプレッドシート B2:K2 から読込")
-    except Exception as e:
+    except Exception:
         st.error("投入ptのGoogleスプレッドシート読込に失敗しました。")
         st.stop()
-
-    if st.button("🔄 データ更新"):
-        st.cache_data.clear()
 
     pred_rows = calc_next_update_predictions(
         raw=raw,
