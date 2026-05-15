@@ -732,7 +732,6 @@ body {
 <th>投入pt</th>
 <th>昨日</th>
 <th>
-    現在
     <button
         onclick="navigator.clipboard.writeText(`__COPY_TEXT__`)"
         style="
@@ -747,7 +746,7 @@ body {
         "
         title="Excel貼り付け用の現在値をコピー"
     >
-        最新
+        現在
     </button>
 </th>
 <th>変動</th>
