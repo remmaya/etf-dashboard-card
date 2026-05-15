@@ -728,7 +728,6 @@ body {
 <tr>
 <th>テーマ</th>
 <th>
-    投入pt
     <button
         onclick="window.parent.location.reload()"
         style="
@@ -743,7 +742,7 @@ body {
         "
         title="Googleスプレッドシートを再読込"
     >
-        🔄
+    投入pt
     </button>
 </th>
 <th>昨日</th>
