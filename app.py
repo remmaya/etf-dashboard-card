@@ -137,7 +137,7 @@ def load_dpoint_points_from_sheet(url):
     df = pd.read_csv(url, header=None)
 
     # B2:K2 を読む
-    values = df.iloc[1, 1:11].tolist()
+    values = df.iloc[1, 0:11].tolist()
 
     points_map = {}
 
@@ -516,8 +516,8 @@ elif view_mode == "翌日更新予測":
             load_dpoint_points_from_sheet.clear()
             st.rerun()
 
-    with col_info:
-        st.caption("投入pt: Googleスプレッドシート B2:K2 から読込")
+    # with col_info:
+        # st.caption("投入pt: Googleスプレッドシート B2:K2 から読込")
 
     try:
         points_map = load_dpoint_points_from_sheet(DPOINT_POINTS_CSV_URL)
