@@ -735,9 +735,9 @@ body {
     <button
         onclick="navigator.clipboard.writeText(`__COPY_TEXT__`)"
         style="
-            margin-left: 6px;
-            font-size: 16px;
-            padding: 2px 6px;
+            margin-left: 10px;
+            font-size: 18px;
+            padding: 6px 10px;
             border-radius: 5px;
             border: 1px solid #999;
             background: #ffffff;
