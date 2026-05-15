@@ -46,7 +46,7 @@ POINT_ORDER = [
     "IVV",
 ]
 
-DPOINT_POINTS_CSV_URL = "DPOINT_POINTS_CSV_URL = "https://docs.google.com/spreadsheets/d/1Nr-e5iOt0j7i2njxQixPMSnky16KQqR_4REXHnxizsY/export?format=csv&gid=0""
+DPOINT_POINTS_CSV_URL = "https://docs.google.com/spreadsheets/d/1Nr-e5iOt0j7i2njxQixPMSnky16KQqR_4REXHnxizsY/export?format=csv&gid=0"
 
 st.set_page_config(page_title="ETF Dashboard", layout="wide")
 
