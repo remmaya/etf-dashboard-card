@@ -499,23 +499,7 @@ elif view_mode == "翌日更新予測":
 
         copy_text = "\t".join(copy_values)
 
-        components.html(
-            f"""
-            <button
-                onclick="navigator.clipboard.writeText(`{copy_text}`)"
-                style="
-                    font-size: 16px;
-                    padding: 8px 14px;
-                    border-radius: 8px;
-                    border: 1px solid #999;
-                    cursor: pointer;
-                    background: #f5f5f5;
-                    color: #111;
-                    margin: 8px 0 12px 0;
-                "
-            >
-                Excel貼り付け用の現在値をコピー
-            </button>
+        
 
             <div style="
                 font-size: 12px;
@@ -761,7 +745,25 @@ body {
 <th>テーマ</th>
 <th>投入pt</th>
 <th>昨日</th>
-<th>現在</th>
+<th>
+    現在
+    <button
+        onclick="navigator.clipboard.writeText(`__COPY_TEXT__`)"
+        style="
+            margin-left: 6px;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 5px;
+            border: 1px solid #999;
+            background: #ffffff;
+            color: #111111;
+            cursor: pointer;
+        "
+        title="Excel貼り付け用の現在値をコピー"
+    >
+        最新
+    </button>
+</th>
 <th>変動</th>
 <th>dポ投資</th>
 <th>予想損益</th>
@@ -773,7 +775,11 @@ __ROWS__
 </table>
 """
 
-    table_html = table_template.replace("__ROWS__", rows_html)
+    table_html = (
+    table_template
+    .replace("__ROWS__", rows_html)
+    .replace("__COPY_TEXT__", copy_text)
+    )
 
     components.html(
         table_html,
