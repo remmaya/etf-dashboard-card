@@ -236,7 +236,14 @@ with st.sidebar:
 holdings = load_holdings().copy()
 
 holdings["code"] = holdings["code"].astype(str)
-holdings["ticker"] = holdings["code"] + ".T"
+
+def make_yfinance_ticker(code):
+    code = str(code).strip()
+    if code.startswith("^"):
+        return code
+    return code + ".T"
+
+holdings["ticker"] = holdings["code"].apply(make_yfinance_ticker)
 
 tickers = holdings["ticker"].tolist()
 prices = load_prices(tickers)
