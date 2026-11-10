@@ -353,12 +353,6 @@ elif view_mode == "翌日更新予測":
     total_change = sum(r["予測変動pt"] for r in pred_rows)
     total_pct = total_change / known_points * 100 if known_points else 0
 
-    # 上部サマリー
-    m1, m2, m3 = st.columns(3)
-    m1.metric("投入pt 合計", f"{total_points:,.0f} pt")
-    m2.metric("予想損益", f"{total_change:+,.0f} pt", f"{total_pct:+.2f}%")
-    m3.metric("予想更新後", f"{total_points + total_change:,.0f} pt")
-
     st.caption(
         f"前回基準日: {base_date} ／ 現在ドル円使用値: {current_fx_used:.2f}（API値: {current_fx:.2f}）"
     )
