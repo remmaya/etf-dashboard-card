@@ -4,13 +4,12 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-import yfinance as yf
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from core import calc_perf, slice_period  # noqa: E402
+from core import download_close, slice_period  # noqa: E402
 from ui import (  # noqa: E402
     make_macd_rsi_chart,
     make_price_chart,
@@ -39,19 +38,9 @@ def load_holdings():
     return df.dropna(subset=["code"])
 
 
-@st.cache_data(ttl=60 * 10)
+@st.cache_data(ttl=60 * 10, show_spinner="株価データを取得中…")
 def load_prices(tickers):
-    df = yf.download(
-        list(tickers),
-        period="2y",
-        auto_adjust=True,
-        progress=False,
-    )["Close"]
-
-    if isinstance(df, pd.Series):
-        df = df.to_frame(name=tickers[0])
-
-    return df
+    return download_close(tickers)
 
 
 def make_yfinance_ticker(code):
@@ -128,7 +117,7 @@ holdings["ticker"] = holdings["code"].apply(make_yfinance_ticker)
 tickers = tuple(holdings["ticker"].tolist())
 
 try:
-    prices = load_prices(tickers)
+    prices, _failed = load_prices(tickers)
 except Exception:
     st.error("価格データの取得に失敗しました。少し時間をおいて「🔄 データ更新」を押してください。")
     st.stop()
@@ -163,7 +152,8 @@ for _, row in holdings.iterrows():
     )
 
 if missing:
-    st.warning("価格を取得できなかった銘柄: " + "、".join(missing))
+    st.warning("⚠️ 株価を取得できなかった銘柄: " + "、".join(missing) + "　次の操作時に自動で再取得します。")
+    load_prices.clear()
 
 # 並び替え（グラフ表示にも反映）
 SORT_KEYS = {
