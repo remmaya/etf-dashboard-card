@@ -1,6 +1,7 @@
 # ui.py
 # 2つのページで共通の表示部品（バッジ・チャート・HTMLテーブル）
 import html
+import json
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -284,3 +285,75 @@ def render_html_table(header_html, rows_html, min_width=860, rows_count=10):
     # 行数に合わせて高さを決める（余白が大きくなりすぎないように）
     height = min(60 + 46 * (rows_count + 1), 900)
     components.html(table_html, height=height, scrolling=True)
+
+
+# -----------------------------
+# コピーボタン（クリップボードへ）
+# -----------------------------
+def copy_button_js(text, label, done_label="✓ コピー"):
+    """onclick に入れるJS。text はJSON文字列化して安全に埋め込む"""
+    t = json.dumps(text)
+    l = json.dumps(label)
+    d = json.dumps(done_label)
+    return (
+        f"const text = {t}; const btn = this;"
+        f"const done = () => {{ btn.textContent = {d}; setTimeout(() => btn.textContent = {l}, 1500); }};"
+        "const fallback = () => {"
+        " const ta = document.createElement(\"textarea\"); ta.value = text;"
+        " document.body.appendChild(ta); ta.select();"
+        " try { document.execCommand(\"copy\"); done(); } catch (e) { btn.textContent = \"コピー失敗\"; }"
+        " document.body.removeChild(ta); };"
+        "if (navigator.clipboard) { navigator.clipboard.writeText(text).then(done).catch(fallback); } else { fallback(); }"
+    )
+
+
+def render_copy_button(text, label="📋 コピー"):
+    """単独のコピーボタン（サイドバーなどに置く）"""
+    js = html.escape(copy_button_js(text, label), quote=True)
+    components.html(
+        f"""
+<button onclick="{js}" style="
+    width: 100%; font-size: 15px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid rgba(49,51,63,0.2); background: #ffffff; color: #31333f; cursor: pointer;
+    font-family: 'Source Sans Pro', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+">{html.escape(label)}</button>
+""",
+        height=48,
+    )
+
+
+# -----------------------------
+# 投入ptの配分グラフ
+# -----------------------------
+def make_allocation_chart(labels, values, colors):
+    """横棒（多い順に上から）。各棒に pt と構成比を表示"""
+    total = sum(values) or 1
+    order = sorted(range(len(values)), key=lambda i: values[i])  # 横棒は下から描かれるので昇順
+    labels = [labels[i] for i in order]
+    values = [values[i] for i in order]
+    colors = [colors[i] for i in order]
+    texts = [f"{v:,.0f} pt（{v / total * 100:.1f}%）" for v in values]
+
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker=dict(color=colors, line=dict(color="#ffffff", width=2)),
+            text=texts,
+            textposition="outside",
+            textfont=dict(color="#31333f", size=14),
+            cliponaxis=False,
+            hovertemplate="%{y}: %{x:,.0f} pt<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        height=60 + 38 * len(values),
+        margin=dict(l=10, r=150, t=10, b=10),
+        showlegend=False,
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.06)", tickformat=",", title=None),
+        yaxis=dict(tickfont=dict(size=15)),
+        bargap=0.25,
+    )
+    return fig

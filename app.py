@@ -1,14 +1,31 @@
 # app.py
 import html
-import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 
-from core import ETF_INFO, calc_perf, download_close, slice_period
+from core import (
+    DPOINT_UPDATE_HOUR,
+    ETF_INFO,
+    calc_perf,
+    default_base_date as calc_default_base_date,
+    download_close,
+    download_intraday,
+    estimate_ttm,
+    is_ttm_fixed,
+    next_dpoint_update_date,
+    slice_period,
+    summarize_indicators,
+    us_market_status,
+)
 from ui import (
+    copy_button_js,
+    make_allocation_chart,
     make_macd_rsi_chart,
     make_price_chart,
+    render_copy_button,
     render_html_table,
     render_title,
     show_chart,
@@ -95,9 +112,14 @@ with st.sidebar:
 # -----------------------------
 # データ取得
 # -----------------------------
-@st.cache_data(ttl=60 * 60 * 6, show_spinner="株価データを取得中…")
+@st.cache_data(ttl=60 * 15, show_spinner="株価データを取得中…")
 def load_data():
     return download_close(DISPLAY_ITEMS)
+
+
+@st.cache_data(ttl=60 * 15)
+def load_fx_intraday():
+    return download_intraday(FX_TICKER)
 
 
 @st.cache_data(ttl=60 * 5)
@@ -212,8 +234,23 @@ if missing:
 if raw.empty:
     st.stop()
 
+WD = "月火水木金土日"
+
 fx = raw[FX_TICKER].dropna() if FX_TICKER in raw.columns else pd.Series(dtype=float)
-current_fx = float(fx.iloc[-1]) if not fx.empty else None
+fx_intraday = load_fx_intraday()
+
+# 現在のドル円：30分足があればそちらの最新値（日足より新しい）
+if not fx_intraday.empty:
+    current_fx, fx_time = float(fx_intraday.iloc[-1]), fx_intraday.index[-1]
+elif not fx.empty:
+    current_fx, fx_time = float(fx.iloc[-1]), None
+else:
+    current_fx, fx_time = None, None
+
+now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+etf_idx = etf_trading_index(raw)
+last_etf_date = etf_idx[-1].date()
+market_state, ny_now = us_market_status(last_etf_date, now_jst)
 
 items = []
 for ticker in DISPLAY_ITEMS:
@@ -241,6 +278,92 @@ if sort_mode == "騰落率順":
         key=lambda x: x["perf"] if x["perf"] is not None else -9999,
         reverse=True,
     )
+
+try:
+    points_map = load_dpoint_points_from_sheet(get_points_csv_url())
+    points_error = False
+except Exception:
+    points_map, points_error = {}, True
+
+
+# -----------------------------
+# データ時刻の表示（全ページ共通）
+# -----------------------------
+if market_state == "trading":
+    etf_status = (
+        f"ETF価格: {last_etf_date:%m/%d}（{WD[last_etf_date.weekday()]}）"
+        f"🟢 取引中・途中経過（ニューヨーク {ny_now:%H:%M}）"
+    )
+else:
+    etf_status = f"ETF価格: {last_etf_date:%m/%d}（{WD[last_etf_date.weekday()]}）終値"
+
+fx_status = f"ドル円: {fx_time:%m/%d %H:%M} 時点" if fx_time is not None else "ドル円: 日足終値"
+st.caption(f"{etf_status} ／ {fx_status} ／ 表示: {now_jst:%m/%d %H:%M}")
+
+
+# -----------------------------
+# サイドバー：AI分析用コピー
+# -----------------------------
+def build_ai_prompt():
+    basis = "円建て（為替の影響込み）" if currency == "JPY" else "ドル建て"
+    state = "途中経過（米国市場取引中）" if market_state == "trading" else "終値"
+    total_pt = sum(points_map.get(t, 0) for t in TARGET_ETFS)
+
+    lines = [
+        "以下は「dポイント投資（テーマ運用）」の各テーマに連動する米国ETFの指標です。",
+        f"基準: {last_etf_date:%Y/%m/%d} の{state} ／ 期間: {period} ／ {basis}",
+        "各テーマについて、直近の傾向を1〜2文で簡潔にまとめ、最後に全体の所感を一言ください。",
+        "（売買の推奨ではなく、指標の読み取りとしてお願いします）",
+        "",
+        "テーマ(ティッカー): 期間騰落率 / 前日比 / RSI(14) / MACDとシグナル / 25日線乖離 / 投入pt(構成比)",
+    ]
+
+    for item in items:
+        t = item["ticker"]
+        if t == FX_TICKER:
+            continue
+        ind = summarize_indicators(item["full"], item["close"])
+
+        def pct(v):
+            return f"{v:+.1f}%" if v is not None else "-"
+
+        macd_text = "-"
+        if ind["macd_state"]:
+            macd_text = f"MACD{'>' if ind['macd_state'] == '上' else '<'}シグナル"
+            if ind["cross_days"] is not None and ind["cross_days"] <= 10:
+                cross = "上抜け" if ind["macd_state"] == "上" else "下抜け"
+                macd_text += f"（{ind['cross_days']}営業日前に{cross}）" if ind["cross_days"] else f"（本日{cross}）"
+
+        pt = points_map.get(t)
+        pt_text = f"{pt:,}pt ({pt / total_pt * 100:.1f}%)" if pt is not None and total_pt else "-"
+        rsi_text = f"RSI {ind['rsi']:.0f}" if ind["rsi"] is not None else "RSI -"
+
+        lines.append(
+            f"- {item['label']}({t}): {pct(ind['perf'])} / {pct(ind['day_perf'])} / {rsi_text} / "
+            f"{macd_text} / {pct(ind['ma25_gap'])} / {pt_text}"
+        )
+
+    fx_item = next((it for it in items if it["ticker"] == FX_TICKER), None)
+    if fx_item is not None:
+        perf, day_perf = calc_perf(fx_item["close"])
+        lines.append("")
+        lines.append(
+            f"ドル円: {current_fx:.2f} / 期間 {perf:+.1f}% / 前日比 {day_perf:+.1f}%"
+            if perf is not None and day_perf is not None and current_fx
+            else "ドル円: -"
+        )
+
+    return "\n".join(lines)
+
+
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("**🤖 AI分析用**")
+    ai_prompt = build_ai_prompt()
+    render_copy_button(ai_prompt, label="📋 指標をコピー")
+    st.caption("ChatGPT や Claude に貼り付けて使えます（期間・建値の設定が反映されます）")
+    with st.expander("コピー内容を確認"):
+        st.code(ai_prompt, language=None)
 
 
 # -----------------------------
@@ -271,19 +394,35 @@ elif view_mode == "翌日更新予測":
         st.error("USDJPY=X を取得できませんでした。")
         st.stop()
 
-    # 既定の前回基準日 = ETFの「前営業日」
-    # （ドル円だけ当日の行があっても影響されないよう、ETFの取引日で判定）
-    etf_idx = etf_trading_index(raw)
-    default_base_date = (etf_idx[-2] if len(etf_idx) >= 2 else etf_idx[-1]).date()
+    # 既定の前回基準日 = 直近のdポイント更新に使われたETF終値の日付
+    # （日本時間の現在時刻・土日祝から「直近の更新日」を割り出して決める）
+    default_base_date, last_update = calc_default_base_date(etf_idx, now_jst)
+    next_update = next_dpoint_update_date(last_update)
+
+    # 前回仲値（推定）＝直近更新日の 9:55 ごろのレート
+    prev_ttm_est, prev_ttm_time = estimate_ttm(fx_intraday, last_update)
+    default_prev_ttm = float(round(prev_ttm_est if prev_ttm_est else current_fx, 2))
+
+    # 次回更新の仲値がもう決まっていれば（当日10時以降）、それを使う。まだなら現在レート
+    next_ttm_est, next_ttm_time = (None, None)
+    if is_ttm_fixed(now_jst, next_update):
+        next_ttm_est, next_ttm_time = estimate_ttm(fx_intraday, next_update)
+
+    if next_ttm_est:
+        auto_fx = float(round(next_ttm_est, 2))
+        auto_fx_label = f"{next_update:%m/%d}（{WD[next_update.weekday()]}）仲値・推定"
+    else:
+        auto_fx = float(round(current_fx, 2))
+        auto_fx_label = "現在レート"
 
     # 表示切替をまたいで入力値を保持するため、ウィジェットとは別のキーに保存する
-    # 日付が変わったら前回基準日の既定値も追従させる（同じ日の間は手動入力を保持）
-    if st.session_state.get("base_date_default") != default_base_date:
-        st.session_state["base_date_default"] = default_base_date
+    # 直近の更新日が変わったら既定値も追従させる（同じ間は手動入力を保持）
+    if st.session_state.get("defaults_for") != (last_update, default_prev_ttm):
+        st.session_state["defaults_for"] = (last_update, default_prev_ttm)
         st.session_state["base_date"] = default_base_date
+        st.session_state["prev_ttm"] = default_prev_ttm
 
-    st.session_state.setdefault("prev_ttm", float(round(current_fx, 2)))
-    st.session_state.setdefault("current_fx_used", float(round(current_fx, 2)))
+    st.session_state.setdefault("current_fx_used", auto_fx)
 
     c1, c2, c3 = st.columns(3)
 
@@ -294,15 +433,20 @@ elif view_mode == "翌日更新予測":
             value=st.session_state["prev_ttm"],
             step=0.01,
             format="%.2f",
+            help="直近の更新日の 9:55 ごろのドル円（30分足）から自動で入ります。正式な仲値とは数銭ずれることがあります。",
         )
         st.session_state["prev_ttm"] = prev_ttm
+        if prev_ttm_est:
+            st.caption(f"自動値: {prev_ttm_est:.2f}（{prev_ttm_time:%m/%d %H:%M} 足から推定）")
+        else:
+            st.caption("自動推定できなかったため、現在レートを仮に入れています。")
 
     with c2:
-        use_api_fx = st.checkbox("現在ドル円にAPI値を使う", value=True)
+        use_api_fx = st.checkbox("現在ドル円に自動値を使う", value=True)
 
         if use_api_fx:
-            current_fx_used = float(round(current_fx, 2))
-            st.metric("現在ドル円（使用値）", f"{current_fx_used:.2f}")
+            current_fx_used = auto_fx
+            st.metric(f"現在ドル円（{auto_fx_label}）", f"{current_fx_used:.2f}")
         else:
             current_fx_used = st.number_input(
                 "現在ドル円（使用値）",
@@ -313,15 +457,19 @@ elif view_mode == "翌日更新予測":
             )
             st.session_state["current_fx_used"] = current_fx_used
 
-        st.caption(f"API値: {current_fx:.2f}")
+        st.caption(f"現在レート: {current_fx:.2f}")
 
     with c3:
         base_date = st.date_input(
             "前回基準日",
             value=st.session_state["base_date"],
-            help="通常日は前営業日、GW・年末年始・祝日明けはdポイント投資の前回更新に使われた基準日を選びます。",
+            help=f"直近のdポイント更新（{DPOINT_UPDATE_HOUR}時更新とみなす）に使われた米国ETF終値の日付が自動で入ります。ずれている場合は手動で変更してください。",
         )
         st.session_state["base_date"] = base_date
+        st.caption(
+            f"直近の更新: {last_update:%m/%d}（{WD[last_update.weekday()]}）夕方 → "
+            f"{default_base_date:%m/%d}（{WD[default_base_date.weekday()]}）終値ベース"
+        )
 
     if prev_ttm <= 0 or current_fx_used <= 0:
         st.warning("ドル円には 0 より大きい値を入力してください。")
@@ -331,9 +479,7 @@ elif view_mode == "翌日更新予測":
         load_dpoint_points_from_sheet.clear()
         st.rerun()
 
-    try:
-        points_map = load_dpoint_points_from_sheet(get_points_csv_url())
-    except Exception:
+    if points_error:
         st.error("投入ptのGoogleスプレッドシート読込に失敗しました。シートの共有設定（リンクを知っている全員が閲覧可）を確認してください。")
         st.stop()
 
@@ -354,7 +500,7 @@ elif view_mode == "翌日更新予測":
     total_pct = total_change / known_points * 100 if known_points else 0
 
     st.caption(
-        f"前回基準日: {base_date} ／ 現在ドル円使用値: {current_fx_used:.2f}（API値: {current_fx:.2f}）"
+        f"前回基準日: {base_date} ／ 前回仲値: {prev_ttm:.2f} ／ 現在ドル円使用値: {current_fx_used:.2f}"
     )
     if failed:
         st.caption(
@@ -435,20 +581,8 @@ elif view_mode == "翌日更新予測":
     row_count += 1
 
     # 「現在」ボタンを押すと Excel 貼り付け用の値をコピー
-    copy_button = f"""
-<button class="copy-btn" title="Excel貼り付け用の現在値をコピー" onclick='
-    const text = {json.dumps(copy_text)};
-    const btn = this;
-    const done = () => {{ btn.textContent = "✓ コピー"; setTimeout(() => btn.textContent = "現在", 1500); }};
-    const fallback = () => {{
-        const ta = document.createElement("textarea");
-        ta.value = text; document.body.appendChild(ta); ta.select();
-        try {{ document.execCommand("copy"); done(); }} catch (e) {{ btn.textContent = "コピー失敗"; }}
-        document.body.removeChild(ta);
-    }};
-    if (navigator.clipboard) {{ navigator.clipboard.writeText(text).then(done).catch(fallback); }} else {{ fallback(); }}
-'>現在</button>
-"""
+    copy_js = html.escape(copy_button_js(copy_text, "現在"), quote=True)
+    copy_button = f'<button class="copy-btn" title="Excel貼り付け用の現在値をコピー" onclick="{copy_js}">現在</button>'
 
     header_html = (
         "<th>テーマ</th><th>投入pt</th><th>昨日</th>"
@@ -457,6 +591,21 @@ elif view_mode == "翌日更新予測":
     )
 
     render_html_table(header_html, rows_html, min_width=860, rows_count=row_count)
+
+    # 投入ptの配分
+    alloc = [t for t in PREDICTION_ORDER if t != FX_TICKER and points_map.get(t, 0) > 0]
+    if alloc:
+        st.markdown("#### 投入ptの配分")
+        show_chart(
+            make_allocation_chart(
+                labels=[DISPLAY_LABELS.get(t, t) for t in alloc],
+                values=[points_map[t] for t in alloc],
+                colors=[THEME_COLORS.get(t, "#CCCCCC") for t in alloc],
+            )
+        )
+        zero = [DISPLAY_LABELS.get(t, t) for t in TARGET_ETFS if points_map.get(t, 0) <= 0]
+        if zero:
+            st.caption("投入ptが0のテーマ: " + "、".join(zero))
 
 
 # -----------------------------

@@ -1,6 +1,7 @@
 # core.py
 # 計算ロジック（Streamlit / Plotly に依存しない純粋な関数だけを置く）
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -73,6 +74,170 @@ def download_close(tickers, period="2y", retries=2, wait_sec=1.5):
 
     close = close.sort_index()
     return close, missing_tickers(close, tickers)
+
+
+def download_intraday(ticker, period="1mo", interval="30m") -> pd.Series:
+    """30分足の終値（日本時間インデックス）。失敗時は空Series"""
+    import yfinance as yf
+
+    try:
+        df = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
+    except Exception:
+        return pd.Series(dtype=float)
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+
+    close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    return to_jst_index(close.dropna())
+
+
+# -----------------------------
+# dポイント投資の更新日と前回基準日
+# -----------------------------
+# dポイント投資（テーマ）の更新時刻（日本時間）。この時刻を過ぎたら「今日の更新は済んだ」とみなす
+DPOINT_UPDATE_HOUR = 17
+
+
+def is_jp_business_day(d) -> bool:
+    """日本の営業日か（土日・祝日・年末年始 12/31〜1/3 を除く）"""
+    if d.weekday() >= 5:
+        return False
+    if (d.month, d.day) in [(12, 31), (1, 1), (1, 2), (1, 3)]:
+        return False
+    try:
+        import jpholiday
+
+        if jpholiday.is_holiday(d):
+            return False
+    except ImportError:
+        pass
+    return True
+
+
+def last_dpoint_update_date(now_jst, update_hour: int = DPOINT_UPDATE_HOUR):
+    """直近（すでに済んだ）dポイント更新の日付"""
+    d = now_jst.date()
+    if not (is_jp_business_day(d) and now_jst.hour >= update_hour):
+        d -= timedelta(days=1)
+        while not is_jp_business_day(d):
+            d -= timedelta(days=1)
+    return d
+
+
+def default_base_date(etf_dates, now_jst, update_hour: int = DPOINT_UPDATE_HOUR):
+    """
+    前回基準日 = 直近のdポイント更新に使われたETF終値の日付。
+    更新日 D には「D より前の最新の米国終値」が反映される
+    （米国の X日終値は日本時間 X+1日の朝に確定するため）。
+    """
+    last_update = last_dpoint_update_date(now_jst, update_hour)
+    dates = sorted({pd.Timestamp(x).date() for x in etf_dates})
+    before = [x for x in dates if x < last_update]
+    if before:
+        return before[-1], last_update
+    return (dates[-2] if len(dates) >= 2 else dates[-1]), last_update
+
+
+def next_dpoint_update_date(last_update):
+    """直近更新の次の更新日（＝次に反映される更新）"""
+    d = last_update + timedelta(days=1)
+    while not is_jp_business_day(d):
+        d += timedelta(days=1)
+    return d
+
+
+# -----------------------------
+# 仲値（TTM）の推定
+# -----------------------------
+TTM_HOUR, TTM_MINUTE = 9, 55  # 仲値はおおむね 9:55 時点の相場で決まる
+
+
+def to_jst_index(series: pd.Series) -> pd.Series:
+    """インデックスを日本時間に変換（タイムゾーンなしはUTCとみなす）"""
+    s = series.copy()
+    idx = pd.DatetimeIndex(s.index)
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    s.index = idx.tz_convert("Asia/Tokyo")
+    return s
+
+
+def estimate_ttm(fx_intraday_jst: pd.Series, date):
+    """
+    指定日の 9:55 時点に最も近い（それ以前に始まった）足の終値を仲値の推定値とする。
+    戻り値: (推定値, 使った足の時刻) / 見つからなければ (None, None)
+    """
+    if fx_intraday_jst is None or fx_intraday_jst.empty:
+        return None, None
+
+    s = fx_intraday_jst.dropna()
+    day = s[s.index.date == date]
+    cutoff = pd.Timestamp(date).tz_localize("Asia/Tokyo") + pd.Timedelta(hours=TTM_HOUR, minutes=TTM_MINUTE)
+    day = day[day.index <= cutoff]
+    if day.empty:
+        return None, None
+    return float(day.iloc[-1]), day.index[-1]
+
+
+def is_ttm_fixed(now_jst, date) -> bool:
+    """その日の仲値がもう決まっているか"""
+    return now_jst.date() > date or (
+        now_jst.date() == date and (now_jst.hour, now_jst.minute) >= (TTM_HOUR, TTM_MINUTE + 5)
+    )
+
+
+# -----------------------------
+# 米国市場の状態
+# -----------------------------
+def us_market_status(last_etf_date, now_utc):
+    """
+    ETF価格が確定した終値か、取引中の途中経過かを判定する。
+    戻り値: (状態, ニューヨーク現在時刻)  状態は "trading" / "close"
+    """
+    ny = now_utc.astimezone(ZoneInfo("America/New_York"))
+    open_t = ny.replace(hour=9, minute=30, second=0, microsecond=0)
+    close_t = ny.replace(hour=16, minute=0, second=0, microsecond=0)
+
+    trading = (
+        ny.weekday() < 5
+        and open_t <= ny < close_t
+        and last_etf_date == ny.date()
+    )
+    return ("trading" if trading else "close"), ny
+
+
+# -----------------------------
+# AI分析用の指標まとめ
+# -----------------------------
+def summarize_indicators(full_close: pd.Series, period_close: pd.Series) -> dict:
+    """期間騰落率・前日比・RSI・MACDの位置とクロス・25日線乖離率"""
+    perf, day_perf = calc_perf(period_close)
+
+    macd_line, signal_line = macd(full_close)
+    diff = (macd_line - signal_line).dropna()
+    macd_state, cross_days = None, None
+    if not diff.empty:
+        macd_state = "上" if diff.iloc[-1] > 0 else "下"
+        sign = diff > 0
+        changed = sign.ne(sign.shift())
+        changed.iloc[0] = False
+        if changed.any():
+            last_cross = changed[changed].index[-1]
+            cross_days = len(diff.loc[last_cross:]) - 1
+
+    rsi_now = rsi(full_close).dropna()
+    ma25 = full_close.rolling(25).mean().dropna()
+
+    return {
+        "perf": perf,
+        "day_perf": day_perf,
+        "rsi": float(rsi_now.iloc[-1]) if not rsi_now.empty else None,
+        "macd_state": macd_state,
+        "cross_days": cross_days,
+        "ma25_gap": float(full_close.iloc[-1] / ma25.iloc[-1] * 100 - 100) if not ma25.empty else None,
+    }
 
 
 # -----------------------------
