@@ -4,9 +4,8 @@ import json
 
 import pandas as pd
 import streamlit as st
-import yfinance as yf
 
-from core import ETF_INFO, calc_perf, slice_period
+from core import ETF_INFO, calc_perf, download_close, slice_period
 from ui import (
     make_macd_rsi_chart,
     make_price_chart,
@@ -96,12 +95,9 @@ with st.sidebar:
 # -----------------------------
 # データ取得
 # -----------------------------
-@st.cache_data(ttl=60 * 60 * 6)
+@st.cache_data(ttl=60 * 60 * 6, show_spinner="株価データを取得中…")
 def load_data():
-    df = yf.download(DISPLAY_ITEMS, period="2y", auto_adjust=True, progress=False)["Close"]
-    if isinstance(df, pd.Series):
-        df = df.to_frame()
-    return df
+    return download_close(DISPLAY_ITEMS)
 
 
 @st.cache_data(ttl=60 * 5)
@@ -199,13 +195,21 @@ def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map, base_dat
 # 表示用データの準備
 # -----------------------------
 try:
-    raw = load_data()
+    raw, missing = load_data()
 except Exception:
     st.error("価格データの取得に失敗しました。少し時間をおいて「🔄 データ更新」を押してください。")
     st.stop()
 
+if missing:
+    names = "、".join(f"{DISPLAY_LABELS.get(t, t)}（{t}）" for t in missing)
+    st.warning(
+        f"⚠️ 株価を取得できなかった銘柄があります: {names}　"
+        "次の操作時に自動で再取得します。"
+    )
+    # 取りこぼした結果を6時間キャッシュし続けないよう、次回は取り直す
+    load_data.clear()
+
 if raw.empty:
-    st.error("価格データが空でした。少し時間をおいて「🔄 データ更新」を押してください。")
     st.stop()
 
 fx = raw[FX_TICKER].dropna() if FX_TICKER in raw.columns else pd.Series(dtype=float)
@@ -342,9 +346,12 @@ elif view_mode == "翌日更新予測":
     )
     pred_map = {row["ticker"]: row for row in pred_rows}
 
-    total_points = sum(r["投入pt"] for r in pred_rows)
+    # 株価を取れなかったテーマも投入ptは合計に含める（予想損益は計算できた分のみ）
+    failed = [t for t in TARGET_ETFS if t not in pred_map]
+    total_points = sum(points_map.get(t, 0) for t in TARGET_ETFS)
+    known_points = sum(r["投入pt"] for r in pred_rows)
     total_change = sum(r["予測変動pt"] for r in pred_rows)
-    total_pct = total_change / total_points * 100 if total_points else 0
+    total_pct = total_change / known_points * 100 if known_points else 0
 
     # 上部サマリー
     m1, m2, m3 = st.columns(3)
@@ -355,6 +362,11 @@ elif view_mode == "翌日更新予測":
     st.caption(
         f"前回基準日: {base_date} ／ 現在ドル円使用値: {current_fx_used:.2f}（API値: {current_fx:.2f}）"
     )
+    if failed:
+        st.caption(
+            "※ " + "、".join(DISPLAY_LABELS.get(t, t) for t in failed)
+            + " は株価を取得できなかったため、予想損益に含まれていません。"
+        )
 
     # Excel「ETF値」タブ貼り付け用：現在値（タブ区切り）
     copy_values = []
@@ -386,8 +398,20 @@ elif view_mode == "翌日更新予測":
     row_count += 1
 
     for ticker in PREDICTION_ORDER:
+        if ticker == FX_TICKER:
+            continue
+
         row = pred_map.get(ticker)
         if row is None:
+            # 取得失敗のテーマも行は残す（見えなくならないように）
+            rows_html += f"""
+<tr>
+    <td class="first center" style="background-color:{THEME_COLORS.get(ticker, '#EEEEEE')};">{html.escape(DISPLAY_LABELS.get(ticker, ticker))}</td>
+    <td>{points_map.get(ticker, 0):,.0f}</td>
+    <td colspan="5" style="text-align:center; color:#999 !important;">取得失敗</td>
+</tr>
+"""
+            row_count += 1
             continue
 
         rows_html += f"""

@@ -18,6 +18,64 @@ ETF_INFO = {
 
 
 # -----------------------------
+# 株価取得（取りこぼし対策つき）
+# -----------------------------
+def _close_frame(df, tickers):
+    """yf.download の結果から終値の DataFrame を取り出す"""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    close = df["Close"]
+    if isinstance(close, pd.Series):
+        close = close.to_frame(name=tickers[0])
+    return close
+
+
+def missing_tickers(df: pd.DataFrame, tickers) -> list:
+    """列がない／全部NaNの銘柄を返す"""
+    return [t for t in tickers if t not in df.columns or df[t].dropna().empty]
+
+
+def download_close(tickers, period="2y", retries=2, wait_sec=1.5):
+    """
+    まとめて取得 → 取れなかった銘柄だけ1銘柄ずつ再取得する。
+    戻り値: (終値DataFrame, それでも取れなかった銘柄のリスト)
+    """
+    import time
+
+    import yfinance as yf
+
+    tickers = list(tickers)
+
+    try:
+        close = _close_frame(
+            yf.download(tickers, period=period, auto_adjust=True, progress=False),
+            tickers,
+        )
+    except Exception:
+        close = pd.DataFrame()
+
+    for _ in range(retries):
+        missing = missing_tickers(close, tickers)
+        if not missing:
+            break
+
+        time.sleep(wait_sec)
+        for t in missing:
+            try:
+                one = _close_frame(
+                    yf.download(t, period=period, auto_adjust=True, progress=False),
+                    [t],
+                )
+            except Exception:
+                continue
+            if t in one.columns and not one[t].dropna().empty:
+                close = close.drop(columns=[t], errors="ignore").join(one[[t]], how="outer")
+
+    close = close.sort_index()
+    return close, missing_tickers(close, tickers)
+
+
+# -----------------------------
 # MACD（EMA方式）
 # -----------------------------
 def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
