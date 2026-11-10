@@ -9,6 +9,12 @@ import streamlit as st
 from core import (
     DPOINT_UPDATE_HOUR,
     ETF_INFO,
+    RECORD_LABELS,
+    RECORD_ORDER,
+    build_record_row,
+    daily_change,
+    parse_record,
+    period_profit,
     calc_perf,
     default_base_date as calc_default_base_date,
     download_close,
@@ -22,6 +28,8 @@ from core import (
 )
 from ui import (
     copy_button_js,
+    make_cumulative_chart,
+    make_profit_bar_chart,
     make_allocation_chart,
     make_macd_rsi_chart,
     make_price_chart,
@@ -53,6 +61,12 @@ THEME_COLORS = {
     FX_TICKER: "#CCCCCC",
 }
 
+# 記録シートのテーマ名 → 色（ETF以外のテーマも含む）
+LABEL_COLORS = {
+    label: THEME_COLORS.get(key, {"N225": "#f4b183", "N225INV": "#d9d9d9", "OMAKASE": "#ffe699"}.get(key, "#EEEEEE"))
+    for key, label in RECORD_ORDER
+}
+
 # Googleスプレッドシートの投入pt行の並び（A2:K2）
 # クリエネ, 新興国, コミュ, 生活必需品, ヘルスケア,
 # ゴールド, SDGs, 日経, 日経Inv, おまかせ, 米国大型株
@@ -76,6 +90,13 @@ PREDICTION_ORDER = [FX_TICKER, "ICLN", "IEMG", "IXP", "IXJ", "KXI", "IAU", "SDG"
 DEFAULT_DPOINT_POINTS_CSV_URL = "https://docs.google.com/spreadsheets/d/1Nr-e5iOt0j7i2njxQixPMSnky16KQqR_4REXHnxizsY/export?format=csv&gid=0"
 
 
+def get_secret(key, default=None):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
 def get_points_csv_url():
     """Secrets に DPOINT_POINTS_CSV_URL があればそちらを優先する"""
     try:
@@ -94,7 +115,7 @@ with st.sidebar:
 
     view_mode = st.radio(
         "表示内容",
-        ["3×3 Price", "3×3 MACD+RSI", "翌日更新予測", "Card Detail"],
+        ["3×3 Price", "3×3 MACD+RSI", "翌日更新予測", "結果の取り込み", "損益の推移", "Card Detail"],
         index=0,
     )
 
@@ -120,6 +141,12 @@ def load_data():
 @st.cache_data(ttl=60 * 15)
 def load_fx_intraday():
     return download_intraday(FX_TICKER)
+
+
+@st.cache_data(ttl=60 * 5)
+def load_record_sheet(url):
+    """記録シート（日付＋残高11＋損益11）をCSVで読む"""
+    return parse_record(pd.read_csv(url, dtype=str))
 
 
 @st.cache_data(ttl=60 * 5)
@@ -279,11 +306,28 @@ if sort_mode == "騰落率順":
         reverse=True,
     )
 
-try:
-    points_map = load_dpoint_points_from_sheet(get_points_csv_url())
+RECORD_CSV_URL = get_secret("RECORD_CSV_URL")
+record, record_error = None, None
+if RECORD_CSV_URL:
+    try:
+        record = load_record_sheet(RECORD_CSV_URL)
+    except Exception as e:
+        record_error = str(e)
+
+points_source = ""
+if record is not None and not record[0].empty:
+    # 記録シートの最新行の残高を投入ptとして使う
+    latest = record[0].iloc[-1]
+    points_map = {key: int(latest[label]) for key, label in RECORD_ORDER if key in TARGET_ETFS}
     points_error = False
-except Exception:
-    points_map, points_error = {}, True
+    points_source = f"記録シート {record[0].index[-1]:%m/%d} の残高"
+else:
+    try:
+        points_map = load_dpoint_points_from_sheet(get_points_csv_url())
+        points_error = False
+        points_source = "投入ptシート"
+    except Exception:
+        points_map, points_error = {}, True
 
 
 # -----------------------------
@@ -502,6 +546,8 @@ elif view_mode == "翌日更新予測":
     st.caption(
         f"前回基準日: {base_date} ／ 前回仲値: {prev_ttm:.2f} ／ 現在ドル円使用値: {current_fx_used:.2f}"
     )
+    if points_source:
+        st.caption(f"投入pt: {points_source}")
     if failed:
         st.caption(
             "※ " + "、".join(DISPLAY_LABELS.get(t, t) for t in failed)
@@ -606,6 +652,211 @@ elif view_mode == "翌日更新予測":
         zero = [DISPLAY_LABELS.get(t, t) for t in TARGET_ETFS if points_map.get(t, 0) <= 0]
         if zero:
             st.caption("投入ptが0のテーマ: " + "、".join(zero))
+
+
+# -----------------------------
+# 結果の取り込み（Excel記録用の1行を作る）
+# -----------------------------
+elif view_mode == "結果の取り込み":
+    _, last_update = calc_default_base_date(etf_idx, now_jst)
+    st.markdown(f"### 結果の取り込み（{last_update:%m/%d}（{WD[last_update.weekday()]}）更新分）")
+    st.caption(
+        "dポイント運用の各ページで該当部分を選択してコピーし、下の欄に貼り付けてください。"
+        "ページ全体（Ctrl+A）をコピーしても大丈夫です。"
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        theme_text = st.text_area(
+            "① ホーム画面の「テーマ」（各テーマの残高）",
+            height=260,
+            key="record_theme_text",
+            placeholder="おまかせ\nアクティブ\n265,897P\n+8,399P\n金（ゴールド）\n90,097P\n...",
+        )
+    with c2:
+        total_text = st.text_area(
+            "② 「これまでの合計損益」ページ",
+            height=260,
+            key="record_total_text",
+            placeholder="これまでの合計損益\n↑ 385,003P\nおまかせ\n↑147,366P\n...",
+        )
+
+    def clear_record_inputs():
+        st.session_state["record_theme_text"] = ""
+        st.session_state["record_total_text"] = ""
+
+    st.button("🗑 入力欄をクリア", on_click=clear_record_inputs)
+
+    if theme_text.strip() or total_text.strip():
+        row_text, details, check = build_record_row(theme_text, total_text)
+
+        missing_bal = [d["label"] for d in details if d["残高"] is None]
+        missing_prof = [d["label"] for d in details if d["通算損益"] is None]
+
+        # 読み取りチェック
+        if missing_bal and theme_text.strip():
+            st.warning("① で読み取れなかったテーマ: " + "、".join(missing_bal))
+        if missing_prof and total_text.strip():
+            st.warning("② で読み取れなかったテーマ: " + "、".join(missing_prof))
+        for name, (calc, page) in check.items():
+            if calc == page:
+                st.success(f"✓ {name}: 各テーマの合計 {calc:,} pt がページの表示と一致")
+            else:
+                st.error(f"✗ {name}: 各テーマの合計 {calc:,} pt ≠ ページの表示 {page:,} pt（読み取りを確認してください）")
+
+        # 明細テーブル
+        def fmt(v, signed=False):
+            if v is None:
+                return '<span style="color:#bbb !important;">—</span>'
+            return f"{v:+,}" if signed else f"{v:,}"
+
+        rows_html = ""
+        for d in details:
+            color = THEME_COLORS.get(d["key"], "#EEEEEE")
+            rows_html += f"""
+<tr>
+    <td class="first center" style="background-color:{color};">{html.escape(d["label"])}</td>
+    <td>{fmt(d["残高"])}</td>
+    <td class="{sign_class(d["通算損益"]) if d["通算損益"] is not None else ""}">{fmt(d["通算損益"], signed=True)}</td>
+</tr>
+"""
+        sum_bal = sum(d["残高"] or 0 for d in details)
+        sum_prof = sum(d["通算損益"] or 0 for d in details)
+        rows_html += f"""
+<tr class="total-row">
+    <td class="first center">合計</td>
+    <td>{sum_bal:,}</td>
+    <td class="{sign_class(sum_prof)}">{sum_prof:+,}</td>
+</tr>
+"""
+        header_html = "<th>テーマ</th><th>残高（B〜L列）</th><th>通算損益（M〜W列）</th>"
+
+        st.markdown("#### 記録シート用（日付つき・最終行の下に貼る）")
+        render_copy_button(f"{last_update:%Y/%m/%d}\t" + row_text, label="📋 日付つきでコピー（23項目）")
+
+        st.markdown("#### Excel貼り付け用（Sheet1 の B〜W列）")
+        render_copy_button(row_text, label="📋 1行分をコピー（22項目・タブ区切り）")
+        st.caption(f"Sheet1 の {last_update:%m/%d} の行の B列を選択して貼り付けてください。空欄は読み取れなかった項目です。")
+
+        render_html_table(header_html, rows_html, min_width=480, rows_count=len(details) + 1)
+
+
+# -----------------------------
+# 損益の推移（記録シートから）
+# -----------------------------
+elif view_mode == "損益の推移":
+    st.markdown("### 損益の推移")
+
+    rec = record
+    if rec is None:
+        if record_error:
+            st.error("記録シートを読み込めませんでした。シートの共有設定とURLを確認してください。")
+        else:
+            st.info(
+                "記録シートのURLが未設定です。Streamlit の Secrets に `RECORD_CSV_URL` を設定すると、"
+                "ここに自動で表示されます。試しに見るだけなら、下で記録CSVを選んでください。"
+            )
+        up = st.file_uploader("記録CSV（日付＋残高11＋損益11）", type=["csv"])
+        if up is not None:
+            try:
+                rec = parse_record(pd.read_csv(up, dtype=str, encoding="utf-8-sig"))
+            except Exception:
+                st.error("CSVを読み込めませんでした。1行目が見出しになっているか確認してください。")
+                st.stop()
+        else:
+            st.stop()
+
+    bal, pl = rec
+    if len(pl) < 2:
+        st.warning("記録が2日分以上必要です。")
+        st.stop()
+
+    total = pl.sum(axis=1)
+    monthly = period_profit(total, "M")
+    yearly = period_profit(total, "Y")
+    d_pt, d_pct = daily_change(bal, pl)
+    last_day = pl.index[-1]
+
+    # サマリー
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("通算損益", f"{total.iloc[-1]:+,.0f} pt")
+    m2.metric(f"{last_day:%Y}年", f"{yearly.iloc[-1]:+,.0f} pt")
+    m3.metric(f"{last_day:%m}月", f"{monthly.iloc[-1]:+,.0f} pt")
+    m4.metric(f"前日比（{last_day:%m/%d}）", f"{d_pt.iloc[-1].sum():+,.0f} pt")
+    st.caption(f"記録: {pl.index[0]:%Y/%m/%d} 〜 {last_day:%Y/%m/%d}（{len(pl):,}日分）")
+
+    def pl_cell(v, fmt="{:+,.0f}"):
+        if pd.isna(v):
+            return "<td></td>"
+        return f'<td class="{sign_class(v)}">{fmt.format(v)}</td>'
+
+    def theme_header(first):
+        cells = f"<th>{first}</th>"
+        for label in RECORD_LABELS:
+            cells += f'<th style="background-color:{LABEL_COLORS[label]};">{html.escape(label)}</th>'
+        return cells + "<th>合計</th>"
+
+    # 月別損益
+    st.markdown("#### 月別損益")
+    month_opts = [n for n in [12, 24, 36, 60] if n < len(monthly)] + [len(monthly)]
+    n_months = st.select_slider(
+        "表示する月数",
+        options=month_opts,
+        value=24 if 24 in month_opts else month_opts[-1],
+        format_func=lambda n: "全期間" if n == len(monthly) else f"{n}か月",
+    )
+    mon = monthly.tail(n_months)
+    show_chart(make_profit_bar_chart([f"{p.year}/{p.month:02d}" for p in mon.index], mon.values.tolist()))
+
+    # 年別（テーマ別）
+    st.markdown("#### 年別損益（テーマ別）")
+    yearly_theme = pl.groupby(pl.index.to_period("Y")).last().diff()
+    yearly_theme.iloc[0] = pl.groupby(pl.index.to_period("Y")).last().iloc[0] - pl.iloc[0]
+    rows_html = ""
+    for per, row in yearly_theme.iloc[::-1].iterrows():
+        rows_html += f'<tr><td class="first center">{per.year}</td>'
+        rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
+        rows_html += pl_cell(row.sum()) + "</tr>"
+    render_html_table(theme_header("年"), rows_html, min_width=1200, rows_count=len(yearly_theme))
+
+    # 選んだ年の月別（テーマ別）
+    years = sorted({p.year for p in monthly.index}, reverse=True)
+    sel_year = st.selectbox("月別（テーマ別）を表示する年", years, index=0)
+    month_last = pl.groupby(pl.index.to_period("M")).last()
+    month_theme = month_last.diff()
+    month_theme.iloc[0] = month_last.iloc[0] - pl.iloc[0]
+    month_theme = month_theme[[p.year == sel_year for p in month_theme.index]]
+    rows_html = ""
+    for per, row in month_theme.iloc[::-1].iterrows():
+        rows_html += f'<tr><td class="first center">{per.month}月</td>'
+        rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
+        rows_html += pl_cell(row.sum()) + "</tr>"
+    render_html_table(theme_header("月"), rows_html, min_width=1200, rows_count=len(month_theme))
+
+    # 通算損益の推移
+    st.markdown("#### 通算損益の推移")
+    show_chart(make_cumulative_chart(total))
+
+    # テーマ別の前日比
+    st.markdown("#### テーマ別の前日比")
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        unit = st.radio("単位", ["pt", "%"], horizontal=True)
+    with c2:
+        n_days = st.select_slider("表示する日数", options=[10, 20, 40, 60, 120], value=20)
+    src = d_pt if unit == "pt" else d_pct
+    rows_html = ""
+    for day, row in src.tail(n_days).iloc[::-1].iterrows():
+        rows_html += f'<tr><td class="first center">{day:%Y/%m/%d}（{WD[day.weekday()]}）</td>'
+        if unit == "pt":
+            rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
+            rows_html += pl_cell(d_pt.loc[day].sum())
+        else:
+            rows_html += "".join(pl_cell(row[label], "{:+.2f}%") for label in RECORD_LABELS)
+            prev_total = bal.shift(1).loc[day].sum()
+            rows_html += pl_cell(d_pt.loc[day].sum() / prev_total * 100 if prev_total else float("nan"), "{:+.2f}%")
+        rows_html += "</tr>"
+    render_html_table(theme_header("日付"), rows_html, min_width=1300, rows_count=n_days)
 
 
 # -----------------------------

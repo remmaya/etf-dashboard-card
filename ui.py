@@ -357,3 +357,55 @@ def make_allocation_chart(labels, values, colors):
         bargap=0.25,
     )
     return fig
+
+
+# -----------------------------
+# 損益の推移
+# -----------------------------
+POS_COLOR = "#e06666"  # 利益（赤）
+NEG_COLOR = "#6d9eeb"  # 損失（青）
+
+
+def make_profit_bar_chart(labels, values, height=300):
+    """期間ごとの損益（プラスは赤・マイナスは青）"""
+    fig = go.Figure(
+        go.Bar(
+            x=labels,
+            y=values,
+            marker=dict(
+                color=[POS_COLOR if v >= 0 else NEG_COLOR for v in values],
+                line=dict(color="#ffffff", width=2),
+            ),
+            hovertemplate="%{x}: %{y:+,.0f} pt<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False,
+        yaxis=dict(title="pt", tickformat=",", zeroline=True, zerolinecolor="#999", gridcolor="rgba(0,0,0,0.06)"),
+        xaxis=dict(type="category"),
+        bargap=0.25,
+    )
+    return fig
+
+
+def make_cumulative_chart(series, height=300):
+    """通算損益の推移（1本の線）"""
+    fig = go.Figure(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="lines",
+            line=dict(width=2, color="#4a6fa5"),
+            hovertemplate="%{x|%Y/%m/%d}: %{y:,.0f} pt<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False,
+        hovermode="x",
+        yaxis=dict(title="pt", tickformat=",", gridcolor="rgba(0,0,0,0.06)"),
+    )
+    return fig

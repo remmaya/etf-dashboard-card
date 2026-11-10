@@ -1,5 +1,6 @@
 # core.py
 # 計算ロジック（Streamlit / Plotly に依存しない純粋な関数だけを置く）
+import re
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
@@ -238,6 +239,210 @@ def summarize_indicators(full_close: pd.Series, period_close: pd.Series) -> dict
         "cross_days": cross_days,
         "ma25_gap": float(full_close.iloc[-1] / ma25.iloc[-1] * 100 - 100) if not ma25.empty else None,
     }
+
+
+# -----------------------------
+# dポイント運用ページのコピー結果を読み取る（Excel記録用）
+# -----------------------------
+# Excel Sheet1 の B〜L列（残高）・M〜W列（通算損益）の並び
+RECORD_ORDER = [
+    ("ICLN", "クリエネ"),
+    ("IEMG", "新興国"),
+    ("IXP", "コミュ"),
+    ("KXI", "生活必需品"),
+    ("IXJ", "ヘルスケア"),
+    ("IAU", "ゴールド"),
+    ("SDG", "SDGs"),
+    ("N225", "日経"),
+    ("N225INV", "日経Inv"),
+    ("OMAKASE", "おまかせ"),
+    ("IVV", "米国大型株"),
+]
+
+# ページ上の名前 → キー（上から順に判定。「日経インバース」は「日経」より先に）
+_NAME_RULES = [
+    ("インバース", "N225INV"),
+    ("日経", "N225"),
+    ("クリーン", "ICLN"),
+    ("新興国", "IEMG"),
+    ("コミュ", "IXP"),
+    ("生活必需", "KXI"),
+    ("ヘルスケア", "IXJ"),
+    ("ゴールド", "IAU"),
+    ("SDG", "SDG"),
+    ("米国大型", "IVV"),
+    ("おまかせ", "OMAKASE"),
+]
+
+_NUM_RE = re.compile(r"^([+\-−－↑↓]?)\s*([\d,，]+)\s*[PＰpｐ]?$")
+_SIGN_ONLY = {"+", "-", "−", "－", "↑", "↓"}
+# 「日経平均株価 ↑20,349P」のように名前と数字が同じ行に来た場合の分割用
+_TAIL_NUM_RE = re.compile(r"^(.*[^\d,，+\-−－↑↓\s])\s*([+\-−－↑↓]?\s*[\d,，]+\s*[PＰpｐ]?)$")
+
+
+def _split_lines(text):
+    for raw_line in (text or "").replace("\t", "\n").splitlines():
+        line = raw_line.strip()
+        nums = []
+        # 行末の数字を順にはがす（「名前 265,897P +8,399P」→ 名前 / 265,897P / +8,399P）
+        while not _NUM_RE.match(line):
+            m = _TAIL_NUM_RE.match(line)
+            if not m:
+                break
+            nums.insert(0, m.group(2).strip())
+            line = m.group(1).strip()
+        if _NUM_RE.match(line) and nums:
+            # 「265,897P +8,399P」のように数字だけが並んでいる行
+            parts = re.findall(r"[+\-−－↑↓]?\s*[\d,，]+\s*[PＰpｐ]?", line)
+            yield from (p.strip() for p in parts)
+        else:
+            yield line
+        yield from nums
+
+
+def _match_name(buffer: str):
+    text = buffer.replace(" ", "").replace("　", "")
+    if text == "テーマ":
+        return "THEME_TOTAL"
+    if text.endswith("これまでの合計損益"):
+        return "TOTAL"
+    for word, key in _NAME_RULES:
+        if word in text:
+            return key
+    return None
+
+
+def parse_dpoint_page(text: str) -> dict:
+    """
+    ページをコピーしたテキストから {キー: [数値, 数値, ...]} を作る。
+    テーマ画面なら [残高, 前日比]、合計損益ページなら [通算損益]。
+    名前が改行で分かれていても（例:「金（ゴールド」「）」）つなげて判定する。
+    """
+    result = {}
+    buffer, current, pending_sign = [], None, ""
+
+    for line in _split_lines(text):
+        if not line or line in {"P", "Ｐ"}:
+            continue
+
+        if line in _SIGN_ONLY:
+            pending_sign = line
+            continue
+
+        m = _NUM_RE.match(line)
+        if m:
+            if buffer:
+                current = _match_name("".join(buffer))
+                buffer = []
+            sign = m.group(1) or pending_sign
+            pending_sign = ""
+            value = int(m.group(2).replace(",", "").replace("，", ""))
+            if sign in {"-", "−", "－", "↓"}:
+                value = -value
+            if current is not None:
+                result.setdefault(current, []).append(value)
+            continue
+
+        # 名前などの文字列行
+        if current is not None and not buffer:
+            current = None
+        pending_sign = ""
+        buffer.append(line)
+
+    return result
+
+
+def build_record_row(theme_text: str, total_text: str):
+    """
+    戻り値: (タブ区切りの22個の値, 明細リスト, チェック結果dict)
+    明細: [{"key","label","残高","前日比","通算損益"}, ...]
+    """
+    theme = parse_dpoint_page(theme_text)
+    total = parse_dpoint_page(total_text)
+
+    details, balances, profits = [], [], []
+    for key, label in RECORD_ORDER:
+        t = theme.get(key, [])
+        p = total.get(key, [])
+        bal = t[0] if len(t) >= 1 else None
+        day = t[1] if len(t) >= 2 else None
+        prof = p[0] if len(p) >= 1 else None
+        details.append({"key": key, "label": label, "残高": bal, "前日比": day, "通算損益": prof})
+        balances.append(bal)
+        profits.append(prof)
+
+    values = ["" if v is None else str(v) for v in balances + profits]
+
+    # 合計チェック（ページに出ている合計と、各テーマの合計が一致するか）
+    check = {}
+    theme_keys = [k for k, _ in RECORD_ORDER if k != "OMAKASE"]
+    if "THEME_TOTAL" in total:
+        parts = [total.get(k, [None])[0] for k in theme_keys]
+        if None not in parts:
+            check["テーマ合計"] = (sum(parts), total["THEME_TOTAL"][0])
+    if "TOTAL" in total:
+        parts = [total.get(k, [None])[0] for k in ["OMAKASE"]] + [total.get("THEME_TOTAL", [None])[0]]
+        if None not in parts:
+            check["合計損益"] = (sum(parts), total["TOTAL"][0])
+
+    return "\t".join(values), details, check
+
+
+# -----------------------------
+# 記録シート（日付＋残高11＋損益11）の読み込みと集計
+# -----------------------------
+RECORD_LABELS = [label for _, label in RECORD_ORDER]
+
+
+def parse_record(df: pd.DataFrame):
+    """
+    記録シートのDataFrame（1行目が見出し）→ (残高DataFrame, 通算損益DataFrame)
+    列名はテーマの日本語ラベル、インデックスは日付。数字のカンマや空欄にも対応。
+    """
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    date_col = df.columns[0]
+    df[date_col] = pd.to_datetime(df[date_col].astype(str).str.strip(), errors="coerce")
+    df = df.dropna(subset=[date_col]).set_index(date_col).sort_index()
+    df = df[~df.index.duplicated(keep="last")]
+
+    def pick(prefix):
+        out = pd.DataFrame(index=df.index)
+        for label in RECORD_LABELS:
+            col = f"{prefix}:{label}"
+            if col in df.columns:
+                s = df[col].astype(str).str.replace(",", "").str.replace("，", "").str.strip()
+                out[label] = pd.to_numeric(s, errors="coerce")
+            else:
+                out[label] = float("nan")
+        return out
+
+    bal, pl = pick("残高"), pick("損益")
+    # 損益がすべて空の行（未入力の日付だけの行など）は除く
+    keep = pl.notna().any(axis=1)
+    return bal[keep].fillna(0), pl[keep].ffill().fillna(0)
+
+
+def period_profit(pl_total: pd.Series, freq: str) -> pd.Series:
+    """
+    期間ごとの損益（= 期末の通算損益 − 前期末の通算損益）
+    freq: "M"（月）/ "Y"（年）
+    """
+    key = pl_total.index.to_period(freq)
+    last = pl_total.groupby(key).last()
+    first_prev = pl_total.iloc[0]  # 最初の期は記録開始時点からの増減
+    return last.diff().fillna(last.iloc[0] - first_prev)
+
+
+def daily_change(bal: pd.DataFrame, pl: pd.DataFrame):
+    """更新日ごとの前日比（pt と %）。% は前回残高に対する割合"""
+    d_pt = pl.diff()
+    prev_bal = bal.shift(1)
+    d_pct = (d_pt / prev_bal.where(prev_bal > 0)) * 100
+    # 全テーマ変動なしの日（祝日に前日と同じ値を記録した日など）は除く
+    moved = d_pt.fillna(0).ne(0).any(axis=1)
+    moved.iloc[0] = False
+    return d_pt[moved], d_pct[moved]
 
 
 # -----------------------------
