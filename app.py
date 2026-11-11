@@ -796,67 +796,90 @@ elif view_mode == "損益の推移":
             cells += f'<th style="background-color:{LABEL_COLORS[label]};">{html.escape(label)}</th>'
         return cells + "<th>合計</th>"
 
-    # 月別損益
-    st.markdown("#### 月別損益")
-    month_opts = [n for n in [12, 24, 36, 60] if n < len(monthly)] + [len(monthly)]
-    n_months = st.select_slider(
-        "表示する月数",
-        options=month_opts,
-        value=24 if 24 in month_opts else month_opts[-1],
-        format_func=lambda n: "全期間" if n == len(monthly) else f"{n}か月",
-    )
-    mon = monthly.tail(n_months)
-    show_chart(make_profit_bar_chart([f"{p.year}/{p.month:02d}" for p in mon.index], mon.values.tolist()))
+    # 切り替えても各設定（単位・日数・月数・年）を保持する
+    for k in ["hist_unit", "hist_days", "hist_months", "hist_year"]:
+        if k in st.session_state:
+            st.session_state[k] = st.session_state[k]
+    st.session_state.setdefault("hist_unit", "pt")
+    st.session_state.setdefault("hist_days", 20)
 
-    # 年別（テーマ別）
-    st.markdown("#### 年別損益（テーマ別）")
-    yearly_theme = pl.groupby(pl.index.to_period("Y")).last().diff()
-    yearly_theme.iloc[0] = pl.groupby(pl.index.to_period("Y")).last().iloc[0] - pl.iloc[0]
-    rows_html = ""
-    for per, row in yearly_theme.iloc[::-1].iterrows():
-        rows_html += f'<tr><td class="first center">{per.year}</td>'
-        rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
-        rows_html += pl_cell(row.sum()) + "</tr>"
-    render_html_table(theme_header("年"), rows_html, min_width=1200, rows_count=len(yearly_theme))
+    SECTIONS = ["テーマ別の前日比", "月別損益", "年別損益", "通算の推移"]
+    if hasattr(st, "segmented_control"):
+        section = st.segmented_control("表示", SECTIONS, default=SECTIONS[0], key="history_section", label_visibility="collapsed")
+    else:
+        section = st.radio("表示", SECTIONS, horizontal=True, key="history_section", label_visibility="collapsed")
+    section = section or SECTIONS[0]
 
-    # 選んだ年の月別（テーマ別）
-    years = sorted({p.year for p in monthly.index}, reverse=True)
-    sel_year = st.selectbox("月別（テーマ別）を表示する年", years, index=0)
-    month_last = pl.groupby(pl.index.to_period("M")).last()
-    month_theme = month_last.diff()
-    month_theme.iloc[0] = month_last.iloc[0] - pl.iloc[0]
-    month_theme = month_theme[[p.year == sel_year for p in month_theme.index]]
-    rows_html = ""
-    for per, row in month_theme.iloc[::-1].iterrows():
-        rows_html += f'<tr><td class="first center">{per.month}月</td>'
-        rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
-        rows_html += pl_cell(row.sum()) + "</tr>"
-    render_html_table(theme_header("月"), rows_html, min_width=1200, rows_count=len(month_theme))
+    if section == "テーマ別の前日比":
+        # テーマ別の前日比
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            unit = st.radio("単位", ["pt", "%"], horizontal=True, key="hist_unit")
+        with c2:
+            n_days = st.select_slider("表示する日数", options=[10, 20, 40, 60, 120], key="hist_days")
+        src = d_pt if unit == "pt" else d_pct
+        rows_html = ""
+        for day, row in src.tail(n_days).iloc[::-1].iterrows():
+            rows_html += f'<tr><td class="first center">{day:%Y/%m/%d}（{WD[day.weekday()]}）</td>'
+            if unit == "pt":
+                rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
+                rows_html += pl_cell(d_pt.loc[day].sum())
+            else:
+                rows_html += "".join(pl_cell(row[label], "{:+.2f}%") for label in RECORD_LABELS)
+                prev_total = bal.shift(1).loc[day].sum()
+                rows_html += pl_cell(d_pt.loc[day].sum() / prev_total * 100 if prev_total else float("nan"), "{:+.2f}%")
+            rows_html += "</tr>"
+        render_html_table(theme_header("日付"), rows_html, min_width=1300, rows_count=n_days)
 
-    # 通算損益の推移
-    st.markdown("#### 通算損益の推移")
-    show_chart(make_cumulative_chart(total))
+    elif section == "月別損益":
+        # 月別損益
+        month_opts = [n for n in [12, 24, 36, 60] if n < len(monthly)] + [len(monthly)]
+        if st.session_state.get("hist_months") not in month_opts:
+            st.session_state["hist_months"] = 24 if 24 in month_opts else month_opts[-1]
+        n_months = st.select_slider(
+            "表示する月数",
+            options=month_opts,
+            key="hist_months",
+            format_func=lambda n: "全期間" if n == len(monthly) else f"{n}か月",
+        )
+        mon = monthly.tail(n_months)
+        show_chart(make_profit_bar_chart([f"{p.year}/{p.month:02d}" for p in mon.index], mon.values.tolist()))
 
-    # テーマ別の前日比
-    st.markdown("#### テーマ別の前日比")
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        unit = st.radio("単位", ["pt", "%"], horizontal=True)
-    with c2:
-        n_days = st.select_slider("表示する日数", options=[10, 20, 40, 60, 120], value=20)
-    src = d_pt if unit == "pt" else d_pct
-    rows_html = ""
-    for day, row in src.tail(n_days).iloc[::-1].iterrows():
-        rows_html += f'<tr><td class="first center">{day:%Y/%m/%d}（{WD[day.weekday()]}）</td>'
-        if unit == "pt":
+        # 選んだ年の月別（テーマ別）
+        years = sorted({p.year for p in monthly.index}, reverse=True)
+        st.markdown("##### テーマ別の月別損益")
+        if st.session_state.get("hist_year") not in years:
+            st.session_state["hist_year"] = years[0]
+        sel_year = st.selectbox("表示する年", years, key="hist_year")
+        month_last = pl.groupby(pl.index.to_period("M")).last()
+        month_theme = month_last.diff()
+        month_theme.iloc[0] = month_last.iloc[0] - pl.iloc[0]
+        month_theme = month_theme[[p.year == sel_year for p in month_theme.index]]
+        rows_html = ""
+        for per, row in month_theme.iloc[::-1].iterrows():
+            rows_html += f'<tr><td class="first center">{per.month}月</td>'
             rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
-            rows_html += pl_cell(d_pt.loc[day].sum())
-        else:
-            rows_html += "".join(pl_cell(row[label], "{:+.2f}%") for label in RECORD_LABELS)
-            prev_total = bal.shift(1).loc[day].sum()
-            rows_html += pl_cell(d_pt.loc[day].sum() / prev_total * 100 if prev_total else float("nan"), "{:+.2f}%")
-        rows_html += "</tr>"
-    render_html_table(theme_header("日付"), rows_html, min_width=1300, rows_count=n_days)
+            rows_html += pl_cell(row.sum()) + "</tr>"
+        render_html_table(theme_header("月"), rows_html, min_width=1200, rows_count=len(month_theme))
+
+
+    elif section == "年別損益":
+        # 年別（テーマ別）
+        show_chart(make_profit_bar_chart([str(p.year) for p in yearly.index], yearly.values.tolist(), height=260))
+        yearly_theme = pl.groupby(pl.index.to_period("Y")).last().diff()
+        yearly_theme.iloc[0] = pl.groupby(pl.index.to_period("Y")).last().iloc[0] - pl.iloc[0]
+        rows_html = ""
+        for per, row in yearly_theme.iloc[::-1].iterrows():
+            rows_html += f'<tr><td class="first center">{per.year}</td>'
+            rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
+            rows_html += pl_cell(row.sum()) + "</tr>"
+        render_html_table(theme_header("年"), rows_html, min_width=1200, rows_count=len(yearly_theme))
+
+
+    elif section == "通算の推移":
+        # 通算損益の推移
+        show_chart(make_cumulative_chart(total))
+
 
 
 # -----------------------------
