@@ -409,3 +409,54 @@ def make_cumulative_chart(series, height=300):
         yaxis=dict(title="pt", tickformat=",", gridcolor="rgba(0,0,0,0.06)"),
     )
     return fig
+
+
+def make_multi_line_chart(df, colors, height=380):
+    """テーマ別の通算損益（テーマの色の線を重ねる。凡例つき）"""
+    fig = go.Figure()
+    for col, color in zip(df.columns, colors):
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df[col],
+                mode="lines",
+                name=col,
+                line=dict(width=2, color=color),
+                hovertemplate=f"{col}: %{{y:+,.0f}} pt<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=10, b=10),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        yaxis=dict(title="pt", tickformat=",", zeroline=True, zerolinecolor="#999", gridcolor="rgba(0,0,0,0.06)"),
+    )
+    return fig
+
+
+def make_allocation_pie(labels, values, colors, height=420):
+    """投入ptの配分（円グラフ・多い順に時計回り）"""
+    order = sorted(range(len(values)), key=lambda i: values[i], reverse=True)
+    fig = go.Figure(
+        go.Pie(
+            labels=[labels[i] for i in order],
+            values=[values[i] for i in order],
+            marker=dict(colors=[colors[i] for i in order], line=dict(color="#ffffff", width=2)),
+            sort=False,
+            direction="clockwise",
+            rotation=90,
+            textinfo="label+percent",
+            texttemplate="%{label}<br>%{percent:.1%}",
+            textposition="inside",  # ダークモードでも読めるよう、文字は扇形の中だけに出す
+            textfont=dict(color="#111111", size=14),
+            insidetextorientation="horizontal",
+            hovertemplate="%{label}: %{value:,.0f} pt（%{percent:.1%}）<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False,
+    )
+    return fig

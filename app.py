@@ -15,6 +15,7 @@ from core import (
     daily_change,
     parse_record,
     period_profit,
+    principal_flows,
     calc_perf,
     default_base_date as calc_default_base_date,
     download_close,
@@ -29,8 +30,9 @@ from core import (
 from ui import (
     copy_button_js,
     make_cumulative_chart,
+    make_multi_line_chart,
     make_profit_bar_chart,
-    make_allocation_chart,
+    make_allocation_pie,
     make_macd_rsi_chart,
     make_price_chart,
     render_copy_button,
@@ -643,7 +645,7 @@ elif view_mode == "翌日更新予測":
     if alloc:
         st.markdown("#### 投入ptの配分")
         show_chart(
-            make_allocation_chart(
+            make_allocation_pie(
                 labels=[DISPLAY_LABELS.get(t, t) for t in alloc],
                 values=[points_map[t] for t in alloc],
                 colors=[THEME_COLORS.get(t, "#CCCCCC") for t in alloc],
@@ -797,13 +799,14 @@ elif view_mode == "損益の推移":
         return cells + "<th>合計</th>"
 
     # 切り替えても各設定（単位・日数・月数・年）を保持する
-    for k in ["hist_unit", "hist_days", "hist_months", "hist_year"]:
+    for k in ["hist_unit", "hist_days", "hist_months", "hist_year", "hist_cum_period", "hist_cum_zero",
+              "hist_cum_mode", "hist_cum_themes", "hist_flow_theme", "hist_flow_n"]:
         if k in st.session_state:
             st.session_state[k] = st.session_state[k]
     st.session_state.setdefault("hist_unit", "pt")
     st.session_state.setdefault("hist_days", 20)
 
-    SECTIONS = ["テーマ別の前日比", "月別損益", "年別損益", "通算の推移"]
+    SECTIONS = ["テーマ別の前日比", "月別損益", "年別損益", "通算の推移", "追加・引出"]
     if hasattr(st, "segmented_control"):
         section = st.segmented_control("表示", SECTIONS, default=SECTIONS[0], key="history_section", label_visibility="collapsed")
     else:
@@ -860,7 +863,12 @@ elif view_mode == "損益の推移":
             rows_html += f'<tr><td class="first center">{per.month}月</td>'
             rows_html += "".join(pl_cell(row[label]) for label in RECORD_LABELS)
             rows_html += pl_cell(row.sum()) + "</tr>"
-        render_html_table(theme_header("月"), rows_html, min_width=1200, rows_count=len(month_theme))
+        if not month_theme.empty:
+            year_sum = month_theme.sum()
+            rows_html += f'<tr class="total-row"><td class="first center">{sel_year}年 計</td>'
+            rows_html += "".join(pl_cell(year_sum[label]) for label in RECORD_LABELS)
+            rows_html += pl_cell(year_sum.sum()) + "</tr>"
+        render_html_table(theme_header("月"), rows_html, min_width=1200, rows_count=len(month_theme) + 1)
 
 
     elif section == "年別損益":
@@ -877,8 +885,96 @@ elif view_mode == "損益の推移":
 
 
     elif section == "通算の推移":
-        # 通算損益の推移
-        show_chart(make_cumulative_chart(total))
+        # 期間・起点0・合計/テーマ別
+        PERIODS = {"3か月": 91, "6か月": 182, "1年": 365, "3年": 365 * 3, "全期間": None}
+        st.session_state.setdefault("hist_cum_period", "1年")
+        st.session_state.setdefault("hist_cum_zero", False)
+        st.session_state.setdefault("hist_cum_mode", "合計")
+        held_now = [label for label in RECORD_LABELS if bal[label].iloc[-1] > 0]
+        st.session_state.setdefault("hist_cum_themes", held_now or RECORD_LABELS[:3])
+
+        c1, c2, c3 = st.columns([3, 1.3, 1.3])
+        with c1:
+            period_key = st.select_slider("期間", options=list(PERIODS), key="hist_cum_period")
+        with c2:
+            mode = st.radio("表示", ["合計", "テーマ別"], horizontal=True, key="hist_cum_mode")
+        with c3:
+            zero = st.toggle("期間の初日を0にする", key="hist_cum_zero") if hasattr(st, "toggle") \
+                else st.checkbox("期間の初日を0にする", key="hist_cum_zero")
+
+        days = PERIODS[period_key]
+        start = pl.index[-1] - pd.Timedelta(days=days) if days else pl.index[0]
+
+        if mode == "合計":
+            ser = total[total.index >= start]
+            if zero:
+                ser = ser - ser.iloc[0]
+            show_chart(make_cumulative_chart(ser))
+            st.caption(f"{ser.index[0]:%Y/%m/%d} 〜 {ser.index[-1]:%Y/%m/%d}　期間中の増減: {ser.iloc[-1] - ser.iloc[0]:+,.0f} pt")
+        else:
+            themes = st.multiselect("表示するテーマ", RECORD_LABELS, key="hist_cum_themes")
+            if not themes:
+                st.info("表示するテーマを選んでください。")
+            else:
+                df = pl.loc[pl.index >= start, themes]
+                if zero:
+                    df = df - df.iloc[0]
+                show_chart(make_multi_line_chart(df, [LABEL_COLORS[t] for t in themes]))
+                change = (df.iloc[-1] - df.iloc[0]).sort_values(ascending=False)
+                st.caption(
+                    f"{df.index[0]:%Y/%m/%d} 〜 {df.index[-1]:%Y/%m/%d} の増減: "
+                    + "　".join(f"{t} {v:+,.0f}" for t, v in change.items())
+                )
+
+    elif section == "追加・引出":
+        flows = principal_flows(bal, pl)
+        st.caption(
+            "その日の「残高の増減 − 損益の増減」から、入れた（＋）・出した（−）ptを出しています。"
+            "テーマ間の移し替えは、出したテーマが − 、入れたテーマが ＋ になります。"
+            "2025/08 より前は残高が推定値のため、多少ずれることがあります。"
+        )
+        if flows.empty:
+            st.info("追加・引出の記録はありません。")
+        else:
+            st.session_state.setdefault("hist_flow_theme", "すべて")
+            st.session_state.setdefault("hist_flow_n", 30)
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                flow_theme = st.selectbox("テーマ", ["すべて"] + RECORD_LABELS, key="hist_flow_theme")
+            with c2:
+                n_flow = st.select_slider("表示する件数", options=[10, 30, 60, 120, 300], key="hist_flow_n")
+
+            def flow_cell(v):
+                if pd.isna(v) or v == 0:
+                    return "<td></td>"
+                return f"<td>{v:+,.0f}</td>"
+
+            if flow_theme == "すべて":
+                part = flows.tail(n_flow).iloc[::-1]
+                rows_html = ""
+                for day, row in part.iterrows():
+                    rows_html += f'<tr><td class="first center">{day:%Y/%m/%d}（{WD[day.weekday()]}）</td>'
+                    rows_html += "".join(flow_cell(row[label]) for label in RECORD_LABELS)
+                    rows_html += flow_cell(row.sum()) + "</tr>"
+                header = theme_header("日付").replace("<th>合計</th>", "<th>純額</th>")
+                render_html_table(header, rows_html, min_width=1300, rows_count=len(part))
+            else:
+                one = flows[flow_theme]
+                one = one[one != 0]
+                part = one.tail(n_flow).iloc[::-1]
+                rows_html = ""
+                for day, v in part.items():
+                    kind = "追加" if v > 0 else "引出"
+                    rows_html += (
+                        f'<tr><td class="first center">{day:%Y/%m/%d}（{WD[day.weekday()]}）</td>'
+                        f"<td>{kind}</td><td>{v:+,.0f}</td><td>{bal.loc[day, flow_theme]:,.0f}</td></tr>"
+                    )
+                header = "<th>日付</th><th>種類</th><th>pt</th><th>その日の残高</th>"
+                st.caption(
+                    f"{flow_theme}: 追加 {int((one > 0).sum())}回（計 {one[one > 0].sum():+,.0f}）／"
+                    f"引出 {int((one < 0).sum())}回（計 {one[one < 0].sum():+,.0f}）"
+                )
+                render_html_table(header, rows_html, min_width=520, rows_count=len(part))
 
 
 

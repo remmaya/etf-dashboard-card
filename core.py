@@ -434,6 +434,18 @@ def period_profit(pl_total: pd.Series, freq: str) -> pd.Series:
     return last.diff().fillna(last.iloc[0] - first_prev)
 
 
+def principal_flows(bal: pd.DataFrame, pl: pd.DataFrame, min_abs: int = 100) -> pd.DataFrame:
+    """
+    追加・引出の履歴。
+    その日の「残高の増減 − 損益の増減」＝ 入れた（+）／出した（−）pt。
+    min_abs 未満の小さな差（推定残高の誤差など）は除く。
+    戻り値: 入出金のあった日だけのDataFrame（列＝テーマ）
+    """
+    flow = (bal.diff() - pl.diff()).iloc[1:].round(0)
+    flow = flow.where(flow.abs() >= min_abs, 0)
+    return flow[flow.ne(0).any(axis=1)]
+
+
 def daily_change(bal: pd.DataFrame, pl: pd.DataFrame):
     """更新日ごとの前日比（pt と %）。% は前回残高に対する割合"""
     d_pt = pl.diff()
