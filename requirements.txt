@@ -1,5 +1,6 @@
 streamlit
-yfinance
+yfinance>=1.4.0
 pandas
 numpy
 plotly
+jpholiday
