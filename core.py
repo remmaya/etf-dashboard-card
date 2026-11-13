@@ -209,6 +209,69 @@ def us_market_status(last_etf_date, now_utc):
     return ("trading" if trading else "close"), ny
 
 
+def expected_last_close_date(now_utc, margin_min: int = 30):
+    """
+    今の時点で確定しているはずの、最新の米国終値の日付（土日のみ考慮。米国の祝日は考慮しない）。
+    引け（16:00 NY）から margin_min 分たっていれば当日、そうでなければ前の平日。
+    """
+    ny = now_utc.astimezone(ZoneInfo("America/New_York"))
+    d = ny.date()
+    after_close = (ny.hour, ny.minute) >= (16, margin_min)
+    if not (d.weekday() < 5 and after_close):
+        d -= timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+    return d
+
+
+def fetch_recent_close(tickers, days: str = "10d") -> pd.DataFrame:
+    """1銘柄ずつ直近数日の終値を取り直す（まとめて取得で最新日が抜けたときの補完用）"""
+    import yfinance as yf
+
+    frames = {}
+    for t in tickers:
+        try:
+            h = yf.Ticker(t).history(period=days, auto_adjust=True)
+        except Exception:
+            continue
+        if h is None or h.empty or "Close" not in h:
+            continue
+        s = h["Close"].dropna()
+        idx = pd.DatetimeIndex(s.index)
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        s.index = idx.normalize()
+        frames[t] = s
+    return pd.DataFrame(frames)
+
+
+def fill_latest_close(close: pd.DataFrame, tickers, expected_date):
+    """
+    expected_date の終値が欠けている銘柄だけ取り直して埋める。
+    戻り値: (埋めたあとのDataFrame, それでも欠けている銘柄のリスト)
+    """
+    def lacking(df):
+        out = []
+        for t in tickers:
+            if t not in df.columns:
+                out.append(t)
+                continue
+            s = df[t].dropna()
+            if s.empty or s.index[-1].date() < expected_date:
+                out.append(t)
+        return out
+
+    need = lacking(close)
+    if not need:
+        return close, []
+
+    recent = fetch_recent_close(need)
+    if not recent.empty:
+        # 既存の値はそのまま、欠けている日・銘柄だけを補う
+        close = (close.combine_first(recent) if not close.empty else recent).sort_index()
+    return close, lacking(close)
+
+
 # -----------------------------
 # AI分析用の指標まとめ
 # -----------------------------

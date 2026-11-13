@@ -20,6 +20,8 @@ from core import (
     default_base_date as calc_default_base_date,
     download_close,
     download_intraday,
+    expected_last_close_date,
+    fill_latest_close,
     estimate_ttm,
     is_ttm_fixed,
     next_dpoint_update_date,
@@ -140,6 +142,16 @@ def load_data():
     return download_close(DISPLAY_ITEMS)
 
 
+@st.cache_data(ttl=60 * 10, show_spinner="最新の終値を取り直し中…")
+def load_data_with_latest(expected_date):
+    """まとめて取得した結果に、最新日の終値が欠けていれば1銘柄ずつ取り直して補う"""
+    raw, missing = load_data()
+    if raw.empty:
+        return raw, missing, []
+    raw, stale = fill_latest_close(raw, TARGET_ETFS, expected_date)
+    return raw, missing, stale
+
+
 @st.cache_data(ttl=60 * 15)
 def load_fx_intraday():
     return download_intraday(FX_TICKER)
@@ -245,8 +257,11 @@ def calc_next_update_predictions(raw, prev_ttm, current_fx, points_map, base_dat
 # -----------------------------
 # 表示用データの準備
 # -----------------------------
+now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+expected_close = expected_last_close_date(now_jst)
+
 try:
-    raw, missing = load_data()
+    raw, missing, stale = load_data_with_latest(expected_close)
 except Exception:
     st.error("価格データの取得に失敗しました。少し時間をおいて「🔄 データ更新」を押してください。")
     st.stop()
@@ -257,8 +272,18 @@ if missing:
         f"⚠️ 株価を取得できなかった銘柄があります: {names}　"
         "次の操作時に自動で再取得します。"
     )
-    # 取りこぼした結果を6時間キャッシュし続けないよう、次回は取り直す
+    # 取りこぼした結果をキャッシュし続けないよう、次回は取り直す
     load_data.clear()
+    load_data_with_latest.clear()
+
+if stale:
+    st.info(
+        f"ℹ️ {expected_close:%m/%d} の米国終値がまだ反映されていない銘柄があります"
+        f"（{'、'.join(DISPLAY_LABELS.get(t, t) for t in stale)}）。"
+        "データ提供元の更新待ちか、米国市場の休場日の可能性があります。少し時間をおいて「🔄 データ更新」を押してください。"
+    )
+    load_data.clear()
+    load_data_with_latest.clear()
 
 if raw.empty:
     st.stop()
@@ -276,7 +301,6 @@ elif not fx.empty:
 else:
     current_fx, fx_time = None, None
 
-now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
 etf_idx = etf_trading_index(raw)
 last_etf_date = etf_idx[-1].date()
 market_state, ny_now = us_market_status(last_etf_date, now_jst)
@@ -537,6 +561,13 @@ elif view_mode == "翌日更新予測":
         base_date=base_date,
     )
     pred_map = {row["ticker"]: row for row in pred_rows}
+
+    if last_etf_date <= base_date:
+        st.warning(
+            f"⚠️ ETFの最新終値（{last_etf_date:%m/%d}）が前回基準日（{base_date:%m/%d}）以前のため、"
+            "ETFの変動が 0% になっています（予測は為替の分だけです）。"
+            f"{expected_close:%m/%d} の終値が反映されると正しい予測になります。"
+        )
 
     # 株価を取れなかったテーマも投入ptは合計に含める（予想損益は計算できた分のみ）
     failed = [t for t in TARGET_ETFS if t not in pred_map]
