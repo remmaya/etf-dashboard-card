@@ -1,5 +1,6 @@
 # app.py
 import html
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,10 @@ from core import (
     download_intraday,
     expected_last_close_date,
     fill_latest_close,
+    find_date_row,
+    jp_theme_change,
+    sheet_key_and_gid,
+    parse_googlefinance_sheet,
     estimate_ttm,
     is_ttm_fixed,
     next_dpoint_update_date,
@@ -82,8 +87,8 @@ POINT_ORDER = [
     "IXJ",
     "IAU",
     "SDG",
-    None,
-    None,
+    "N225",
+    "N225INV",
     None,
     "IVV",
 ]
@@ -91,7 +96,23 @@ POINT_ORDER = [
 # 予測テーブル・Excel貼り付け用の並び
 PREDICTION_ORDER = [FX_TICKER, "ICLN", "IEMG", "IXP", "IXJ", "KXI", "IAU", "SDG", "IVV"]
 
+# 日経2テーマ: (キー, 表示名, 連動ETF, 指数の何倍か[予備計算用])
+# 当日の東京の値動きが、その日の夕方の更新に反映される
+N225_INDEX = "^N225"
+JP_THEMES = [
+    ("N225", "日経平均", "1321.T", 1),
+    ("N225INV", "日経Inv", "1571.T", -1),
+]
+
 DEFAULT_DPOINT_POINTS_CSV_URL = "https://docs.google.com/spreadsheets/d/1Nr-e5iOt0j7i2njxQixPMSnky16KQqR_4REXHnxizsY/export?format=csv&gid=0"
+
+
+def yfinance_version():
+    try:
+        import yfinance
+        return yfinance.__version__
+    except Exception:
+        return "不明"
 
 
 def get_secret(key, default=None):
@@ -143,13 +164,42 @@ def load_data():
 
 
 @st.cache_data(ttl=60 * 10, show_spinner="最新の終値を取り直し中…")
-def load_data_with_latest(expected_date):
-    """まとめて取得した結果に、最新日の終値が欠けていれば1銘柄ずつ取り直して補う"""
+def load_data_with_latest(expected_date, gf_url):
+    """
+    まとめて取得した結果に、最新日の終値が欠けていれば
+    ① yfinanceで1銘柄ずつ取り直す → ② それでも欠けていれば「ETF価格チェック」シート（GOOGLEFINANCE）で補う
+    戻り値: (DataFrame, 取得失敗の銘柄, 最新日が欠けたままの銘柄, シートで補った銘柄)
+    """
     raw, missing = load_data()
     if raw.empty:
-        return raw, missing, []
+        return raw, missing, [], []
     raw, stale = fill_latest_close(raw, TARGET_ETFS, expected_date)
-    return raw, missing, stale
+
+    filled_by_sheet = []
+    if stale and gf_url:
+        try:
+            gf = parse_googlefinance_sheet(pd.read_csv(gf_url, header=None, dtype=str), expected_date)
+        except Exception:
+            gf = pd.DataFrame()
+        cols = [t for t in stale if t in gf.columns]
+        if cols:
+            # yfinanceにない日・銘柄だけを補う（既存の値は上書きしない）
+            add = gf[cols][gf.index > raw.index.max() - pd.Timedelta(days=10)]
+            raw = raw.combine_first(add).sort_index()
+            still = []
+            for t in stale:
+                s = raw[t].dropna() if t in raw.columns else pd.Series(dtype=float)
+                (still if s.empty or s.index[-1].date() < expected_date else filled_by_sheet).append(t)
+            stale = still
+
+    return raw, missing, stale, filled_by_sheet
+
+
+@st.cache_data(ttl=60 * 5, show_spinner=False)
+def load_jp_prices():
+    """日経2テーマのETF（1321・1571）と日経平均。取引中は途中経過の値が入る"""
+    df, _ = download_close([t for _, _, t, _ in JP_THEMES] + [N225_INDEX], period="1mo")
+    return df
 
 
 @st.cache_data(ttl=60 * 15)
@@ -157,9 +207,46 @@ def load_fx_intraday():
     return download_intraday(FX_TICKER)
 
 
+@st.cache_resource(show_spinner=False)
+def get_gspread_client():
+    """Secrets の GCP_SERVICE_ACCOUNT_JSON からスプレッドシート用のクライアントを作る（なければ None）"""
+    info = get_secret("GCP_SERVICE_ACCOUNT_JSON")
+    if not info:
+        return None
+    try:
+        import gspread
+
+        if isinstance(info, str):
+            info = json.loads(info)
+        else:
+            info = dict(info)
+        return gspread.service_account_from_dict(info)
+    except Exception:
+        return None
+
+
+def open_record_worksheet(url):
+    client = get_gspread_client()
+    key, gid = sheet_key_and_gid(url)
+    if client is None or not key:
+        return None
+    return client.open_by_key(key).get_worksheet_by_id(gid)
+
+
 @st.cache_data(ttl=60 * 5)
 def load_record_sheet(url):
-    """記録シート（日付＋残高11＋損益11）をCSVで読む"""
+    """
+    記録シート（日付＋残高11＋損益11）を読む。
+    サービスアカウントがあればAPIで（シートを非公開にしても読める）、なければ公開CSVで。
+    """
+    try:
+        ws = open_record_worksheet(url)
+        if ws is not None:
+            values = ws.get_all_values()
+            if values:
+                return parse_record(pd.DataFrame(values[1:], columns=values[0]))
+    except Exception:
+        pass
     return parse_record(pd.read_csv(url, dtype=str))
 
 
@@ -261,7 +348,9 @@ now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
 expected_close = expected_last_close_date(now_jst)
 
 try:
-    raw, missing, stale = load_data_with_latest(expected_close)
+    raw, missing, stale, filled_by_sheet = load_data_with_latest(
+        expected_close, get_secret("ETF_PRICE_CSV_URL", get_points_csv_url())
+    )
 except Exception:
     st.error("価格データの取得に失敗しました。少し時間をおいて「🔄 データ更新」を押してください。")
     st.stop()
@@ -276,11 +365,17 @@ if missing:
     load_data.clear()
     load_data_with_latest.clear()
 
+if filled_by_sheet:
+    st.caption(
+        f"ℹ️ {expected_close:%m/%d} の終値は Yahoo から取れなかったため、「ETF価格チェック」シート（Google Finance）の値で補っています。"
+    )
+
 if stale:
     st.info(
         f"ℹ️ {expected_close:%m/%d} の米国終値がまだ反映されていない銘柄があります"
         f"（{'、'.join(DISPLAY_LABELS.get(t, t) for t in stale)}）。"
         "データ提供元の更新待ちか、米国市場の休場日の可能性があります。少し時間をおいて「🔄 データ更新」を押してください。"
+        f"（yfinance {yfinance_version()}）"
     )
     load_data.clear()
     load_data_with_latest.clear()
@@ -344,7 +439,8 @@ points_source = ""
 if record is not None and not record[0].empty:
     # 記録シートの最新行の残高を投入ptとして使う
     latest = record[0].iloc[-1]
-    points_map = {key: int(latest[label]) for key, label in RECORD_ORDER if key in TARGET_ETFS}
+    jp_keys = {k for k, _, _, _ in JP_THEMES}
+    points_map = {key: int(latest[label]) for key, label in RECORD_ORDER if key in TARGET_ETFS or key in jp_keys}
     points_error = False
     points_source = f"記録シート {record[0].index[-1]:%m/%d} の残高"
 else:
@@ -569,11 +665,34 @@ elif view_mode == "翌日更新予測":
             f"{expected_close:%m/%d} の終値が反映されると正しい予測になります。"
         )
 
+    # 日経2テーマ（当日の東京の値動きが、次の更新に反映される）
+    try:
+        jp_px = load_jp_prices()
+    except Exception:
+        jp_px = pd.DataFrame()
+    idx_res = jp_theme_change(jp_px.get(N225_INDEX), next_update, now_jst)
+    jp_rows = []
+    for key, label, etf, mult in JP_THEMES:
+        res = jp_theme_change(jp_px.get(etf), next_update, now_jst)
+        source = etf.replace(".T", "")
+        if res["status"] == "nodata" and idx_res["status"] != "nodata":
+            # ETFが取れないときは日経平均の前日比（インバースは−1倍）で代用
+            res = dict(idx_res)
+            if res["pct"] is not None:
+                res["pct"] *= mult
+            source = "日経平均で代用"
+        pts = points_map.get(key, 0)
+        pct = res["pct"]
+        jp_rows.append({
+            "key": key, "label": label, "points": pts, "source": source, **res,
+            "pred_pt": pts * pct / 100 if pct is not None else None,
+        })
+
     # 株価を取れなかったテーマも投入ptは合計に含める（予想損益は計算できた分のみ）
     failed = [t for t in TARGET_ETFS if t not in pred_map]
-    total_points = sum(points_map.get(t, 0) for t in TARGET_ETFS)
-    known_points = sum(r["投入pt"] for r in pred_rows)
-    total_change = sum(r["予測変動pt"] for r in pred_rows)
+    total_points = sum(points_map.get(t, 0) for t in TARGET_ETFS) + sum(r["points"] for r in jp_rows)
+    known_points = sum(r["投入pt"] for r in pred_rows) + sum(r["points"] for r in jp_rows if r["pred_pt"] is not None)
+    total_change = sum(r["予測変動pt"] for r in pred_rows) + sum(r["pred_pt"] or 0 for r in jp_rows)
     total_pct = total_change / known_points * 100 if known_points else 0
 
     st.caption(
@@ -646,6 +765,33 @@ elif view_mode == "翌日更新予測":
 """
         row_count += 1
 
+    def px(v):
+        if v is None:
+            return "—"
+        return f"{v:,.0f}" if v >= 1000 else f"{v:,.2f}"
+
+    for r in jp_rows:
+        color = LABEL_COLORS["日経" if r["key"] == "N225" else "日経Inv"]
+        if r["status"] == "nodata":
+            body = '<td colspan="5" style="text-align:center; color:#999 !important;">取得失敗</td>'
+        elif r["status"] == "pre":
+            body = (
+                f"<td>{px(r['prev'])}</td><td>—</td>"
+                '<td colspan="3" style="text-align:center; color:#999 !important;">寄り付き前</td>'
+            )
+        else:
+            body = (
+                f"<td>{px(r['prev'])}</td><td>{px(r['cur'])}</td>"
+                f'<td class="{sign_class(r["pct"])}">{r["pct"]:+.2f}%</td>'
+                f'<td class="{sign_class(r["pct"])}">{r["pct"]:+.2f}%</td>'
+                f'<td class="{sign_class(r["pred_pt"])}">{r["pred_pt"]:+,.0f}</td>'
+            )
+        rows_html += (
+            f'<tr><td class="first center" style="background-color:{color};">{r["label"]}</td>'
+            f"<td>{r['points']:,.0f}</td>{body}</tr>"
+        )
+        row_count += 1
+
     rows_html += f"""
 <tr class="total-row">
     <td class="first center">合計</td>
@@ -671,18 +817,27 @@ elif view_mode == "翌日更新予測":
 
     render_html_table(header_html, rows_html, min_width=860, rows_count=row_count)
 
+    jp_state = {"trading": "🟢 取引中・途中経過", "close": "終値で確定", "pre": "寄り付き前（まだ動いていません）", "nodata": "取得失敗"}
+    st.caption(
+        f"日経2テーマ: {next_update:%m/%d}（{WD[next_update.weekday()]}）の東京市場 → "
+        + "／".join(f"{r['label']}（{r['source']}）{jp_state[r['status']]}" for r in jp_rows)
+    )
+
     # 投入ptの配分
-    alloc = [t for t in PREDICTION_ORDER if t != FX_TICKER and points_map.get(t, 0) > 0]
+    jp_label = {k: lab for k, lab, _, _ in JP_THEMES}
+    jp_color = {"N225": LABEL_COLORS["日経"], "N225INV": LABEL_COLORS["日経Inv"]}
+    alloc_keys = [t for t in PREDICTION_ORDER if t != FX_TICKER] + list(jp_label)
+    alloc = [t for t in alloc_keys if points_map.get(t, 0) > 0]
     if alloc:
         st.markdown("#### 投入ptの配分")
         show_chart(
             make_allocation_pie(
-                labels=[DISPLAY_LABELS.get(t, t) for t in alloc],
+                labels=[jp_label.get(t, DISPLAY_LABELS.get(t, t)) for t in alloc],
                 values=[points_map[t] for t in alloc],
-                colors=[THEME_COLORS.get(t, "#CCCCCC") for t in alloc],
+                colors=[jp_color.get(t, THEME_COLORS.get(t, "#CCCCCC")) for t in alloc],
             )
         )
-        zero = [DISPLAY_LABELS.get(t, t) for t in TARGET_ETFS if points_map.get(t, 0) <= 0]
+        zero = [jp_label.get(t, DISPLAY_LABELS.get(t, t)) for t in alloc_keys if points_map.get(t, 0) <= 0]
         if zero:
             st.caption("投入ptが0のテーマ: " + "、".join(zero))
 
@@ -770,6 +925,62 @@ elif view_mode == "結果の取り込み":
         st.markdown("#### Excel貼り付け用（Sheet1 の B〜W列）")
         render_copy_button(row_text, label="📋 1行分をコピー（22項目・タブ区切り）")
         st.caption(f"Sheet1 の {last_update:%m/%d} の行の B列を選択して貼り付けてください。空欄は読み取れなかった項目です。")
+
+        # ---- 記録シートへの追記（サービスアカウント） ----
+        if RECORD_CSV_URL and get_gspread_client() is not None:
+            st.markdown("#### 📝 記録シートに追記")
+            values = row_text.split("\t")
+            complete = len(values) == 22 and all(v != "" for v in values)
+            checks_ok = bool(check) and all(calc == page for calc, page in check.values())
+            date_str = f"{last_update:%Y/%m/%d}"
+
+            if not complete:
+                st.caption("22項目すべてが読み取れたときに追記できます。")
+            elif not checks_ok:
+                st.caption("合計のチェックが ✓ のときに追記できます。")
+
+            new_row = [date_str] + [int(v) for v in values] if complete else None
+
+            def write_row(overwrite_row=None):
+                ws = open_record_worksheet(RECORD_CSV_URL)
+                if overwrite_row:
+                    ws.update(range_name=f"A{overwrite_row}", values=[new_row], value_input_option="USER_ENTERED")
+                else:
+                    ws.append_row(new_row, value_input_option="USER_ENTERED", table_range="A1")
+                load_record_sheet.clear()
+
+            if st.button(f"📝 {date_str} の結果を記録シートに追記", type="primary",
+                         disabled=not (complete and checks_ok), key="append_record"):
+                try:
+                    ws = open_record_worksheet(RECORD_CSV_URL)
+                    dup = find_date_row(ws.col_values(1), last_update)
+                    if dup:
+                        st.session_state["record_dup_row"] = (date_str, dup)
+                    else:
+                        write_row()
+                        st.session_state["record_msg"] = f"✓ {date_str} の行を記録シートに追記しました。"
+                        st.session_state.pop("record_dup_row", None)
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"記録シートに書き込めませんでした（{type(e).__name__}）。共有設定とSecretsを確認してください。")
+
+            dup_state = st.session_state.get("record_dup_row")
+            dup = dup_state[1] if dup_state and dup_state[0] == date_str else None
+            if dup and complete:
+                st.warning(f"{date_str} の行はすでに記録シートにあります（{dup}行目）。")
+                if st.checkbox("この内容で上書きする", key="record_overwrite_ok"):
+                    if st.button("上書き保存", key="record_overwrite"):
+                        try:
+                            write_row(overwrite_row=dup)
+                            st.session_state["record_msg"] = f"✓ {date_str} の行（{dup}行目）を上書きしました。"
+                            st.session_state.pop("record_dup_row", None)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"上書きできませんでした（{type(e).__name__}）。")
+
+            msg = st.session_state.pop("record_msg", None)
+            if msg:
+                st.success(msg)
 
         render_html_table(header_html, rows_html, min_width=480, rows_count=len(details) + 1)
 

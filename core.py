@@ -272,6 +272,108 @@ def fill_latest_close(close: pd.DataFrame, tickers, expected_date):
     return close, lacking(close)
 
 
+def parse_googlefinance_sheet(raw: pd.DataFrame, today) -> pd.DataFrame:
+    """
+    「ETF価格チェック」シート（GOOGLEFINANCEの終値表）を読む。
+    ・「USDJPY」や「ICLN」などのティッカーが並んだ行を見出しとみなす
+    ・その下の、A列が日付（例: 11/12）の行を各日の終値とみなす
+    戻り値: インデックス＝日付、列＝ティッカー（USDJPY は USDJPY=X に読み替え）
+    """
+    grid = raw.fillna("").astype(str).apply(lambda c: c.str.strip())
+    header_row = None
+    for i in range(len(grid)):
+        cells = set(grid.iloc[i].tolist())
+        if {"ICLN", "IVV"} <= cells:
+            header_row = i
+            break
+    if header_row is None:
+        return pd.DataFrame()
+
+    header = grid.iloc[header_row].tolist()
+    cols = {j: ("USDJPY=X" if h.upper() in {"USDJPY", "JPY=X", "USDJPY=X"} else h)
+            for j, h in enumerate(header) if h and h.lower() != "nan" and j > 0}
+
+    records = {}
+    for i in range(header_row + 1, len(grid)):
+        cell = grid.iat[i, 0]
+        if not cell or cell.lower() == "nan":
+            continue
+        if re.fullmatch(r"\d{1,2}/\d{1,2}", cell):
+            # 年なしの「11/12」は今年とみなす（未来の日付になる場合は前年）
+            d = pd.to_datetime(f"{today.year}/{cell}", format="%Y/%m/%d", errors="coerce")
+            if not pd.isna(d) and d.date() > today:
+                d = d - pd.DateOffset(years=1)
+        else:
+            d = pd.to_datetime(cell, errors="coerce")
+        if pd.isna(d):
+            continue
+        row = {}
+        for j, t in cols.items():
+            v = pd.to_numeric(str(grid.iat[i, j]).replace(",", ""), errors="coerce")
+            if not pd.isna(v):
+                row[t] = float(v)
+        if row:
+            records[pd.Timestamp(d.date())] = row
+
+    return pd.DataFrame.from_dict(records, orient="index").sort_index()
+
+
+# -----------------------------
+# 日経テーマ（当日の東京の終値がその日の夕方に反映される）
+# -----------------------------
+TSE_OPEN = (9, 0)
+TSE_CLOSE = (15, 30)
+
+
+def jp_theme_change(series: pd.Series, next_update, now_jst):
+    """
+    次の更新（next_update の夕方）に反映される、日本のETF・指数の変動。
+    戻り値 dict:
+      status: "trading"（取引中・途中経過） / "close"（終値で確定） / "pre"（寄り付き前・まだ動いていない）
+      prev, cur: 前営業日の終値・当日の値（pre のときは None）
+      pct: 変動率%（pre のときは 0）
+    """
+    s = series.dropna() if series is not None else pd.Series(dtype=float)
+    if s.empty:
+        return {"status": "nodata", "prev": None, "cur": None, "pct": None}
+
+    dates = s.index.date
+    today_rows = s[dates == next_update]
+    before = s[dates < next_update]
+
+    if today_rows.empty or before.empty:
+        return {"status": "pre", "prev": float(s.iloc[-1]), "cur": None, "pct": 0.0}
+
+    prev, cur = float(before.iloc[-1]), float(today_rows.iloc[-1])
+    hm = (now_jst.hour, now_jst.minute)
+    trading = now_jst.date() == next_update and TSE_OPEN <= hm < TSE_CLOSE
+    return {
+        "status": "trading" if trading else "close",
+        "prev": prev,
+        "cur": cur,
+        "pct": (cur / prev - 1) * 100,
+    }
+
+
+# -----------------------------
+# 記録シートへの書き込み（Googleスプレッドシート）
+# -----------------------------
+def sheet_key_and_gid(url: str):
+    """スプレッドシートのURLから (ID, gid) を取り出す"""
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url or "")
+    g = re.search(r"gid=(\d+)", url or "")
+    return (m.group(1) if m else None), (int(g.group(1)) if g else 0)
+
+
+def find_date_row(col_a_values, target_date):
+    """A列の値の中から target_date の行番号（1始まり）を探す。なければ None"""
+    for i, v in enumerate(col_a_values, start=1):
+        d = pd.to_datetime(str(v).strip(), errors="coerce")
+        if not pd.isna(d) and d.date() == target_date:
+            return i
+    return None
+
+
 # -----------------------------
 # AI分析用の指標まとめ
 # -----------------------------
